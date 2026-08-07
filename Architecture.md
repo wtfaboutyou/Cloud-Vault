@@ -150,7 +150,7 @@ cloud-vault/
 
 ### Phase 8 — Documentation
 
-- [ ] Complete README
+- [x] Complete README
 - [ ] Write Installation Guide
 - [ ] Write Deployment Guide
 - [ ] Write Security Guide
