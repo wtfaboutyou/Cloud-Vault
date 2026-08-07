@@ -103,39 +103,39 @@ cloud-vault/
 ### Phase 3 — Web Server Configuration
 
 - [x] Configure Nginx
-- [ ] Configure PHP-FPM
-- [ ] Enable HTTPS
-- [ ] Enable Brotli
-- [ ] Configure Rate Limiting
-- [ ] Configure Security Headers
+- [x] Configure PHP-FPM
+- [x] Enable HTTPS
+- [x] Enable Brotli
+- [x] Configure Rate Limiting
+- [x] Configure Security Headers
 
 ---
 
 ### Phase 4 — Database & Storage
 
-- [ ] Configure PostgreSQL
-- [ ] Configure Redis
-- [ ] Configure Data Directory
-- [ ] Configure File Permissions
+- [x] Configure PostgreSQL
+- [x] Configure Redis
+- [x] Configure Data Directory
+- [x] Configure File Permissions
 
 ---
 
 ### Phase 5 — Security
 
-- [ ] Configure UFW
-- [ ] Configure Fail2ban
-- [ ] Configure ClamAV
-- [ ] Harden SSH
-- [ ] Enable OCSP Stapling
+- [x] Configure UFW
+- [x] Configure Fail2ban
+- [x] Configure ClamAV
+- [x] Harden SSH
+- [x] Enable OCSP Stapling
 
 ---
 
 ### Phase 6 — Monitoring
 
-- [ ] Install Prometheus
-- [ ] Install Grafana
-- [ ] Configure Exporters
-- [ ] Create Dashboard
+- [x] Install Prometheus
+- [x] Install Grafana
+- [x] Configure Exporters
+- [x] Create Dashboard
 
 ---
 
