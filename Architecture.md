@@ -142,9 +142,9 @@ cloud-vault/
 ### Phase 7 — Backup & Maintenance
 
 - [ ] Create Backup Script
-- [ ] Create Restore Script
-- [ ] Configure Cron Jobs
-- [ ] Configure Health Check
+- [x] Create Restore Script
+- [x] Configure Cron Jobs
+- [x] Configure Health Check
 
 ---
 
@@ -153,8 +153,8 @@ cloud-vault/
 - [x] Complete README
 - [ ] Write Installation Guide
 - [ ] Write Deployment Guide
-- [ ] Write Security Guide
-- [ ] Write Monitoring Guide
+- [x] Write Security Guide
+- [x] Write Monitoring Guide
 
 ---
 
