@@ -1,11 +1,15 @@
 # CloudVault
 
-Enterprise-grade, self-hosted cloud storage platform built natively on **Debian 13 (Trixie)**.
+**Enterprise-grade, self-hosted cloud storage platform built natively on Debian 13 (Trixie).**
 
 CloudVault uses **Nextcloud** as the cloud storage application and **Nginx** as the
 primary gateway responsible for traffic handling, SSL termination, security headers,
-rate limiting, and performance tuning. All components are installed directly on the OS
-via APT — **no Docker, no containers**.
+rate limiting, and performance tuning. Every component is installed directly on the
+OS via APT — **no Docker, no containers**.
+
+This project focuses on **web server architecture, Linux server administration,
+deployment, security hardening, and performance optimization**, not on developing a
+new cloud storage application.
 
 ---
 
@@ -16,7 +20,7 @@ via APT — **no Docker, no containers**.
 | Web server     | Nginx (HTTP/2, TLS 1.3, Brotli + Gzip, rate limit) |
 | Application    | Nextcloud (latest stable)                        |
 | Runtime        | PHP 8.4 FPM                                      |
-| Database       | PostgreSQL 17                                    |
+| Database       | PostgreSQL 17 (tuned for SSD/NVMe)               |
 | Cache & locks  | Redis 7 (memcache.local / distributed / locking) |
 | TLS            | Let's Encrypt (Certbot) + OCSP Stapling          |
 | Security       | UFW + Fail2ban + ClamAV + AppArmor               |
@@ -25,17 +29,25 @@ via APT — **no Docker, no containers**.
 ## Advanced Production Features (6)
 
 1. **Intrusion Prevention** — Fail2ban integrates with Nginx logs and Nextcloud
-   `nextcloud.log` to ban brute-force / credential-stuffing IPs via UFW.
-2. **Brotli + TLS 1.3 Hardening with OCSP Stapling** — A+ SSL Labs rating, HSTS
-   preload, PFS, strict ciphers.
-3. **ClamAV Antivirus Auto-Scanning** — every upload (Web, WebDAV, Desktop/Mobile)
-   is scanned in real-time by `clamd`.
-4. **Automated OCC Maintenance** — systemd timers run cron.php every 5 minutes and
-   daily maintenance (`db:*`, `preview:pre-generate`, `files:scan --all`, cleanup).
-5. **Encrypted Backup with Retention & Integrity** — AES-256 archives, SHA-256
-   verification, rotation (7 daily / 4 weekly / 12 monthly).
-6. **Centralized Health Checks & Grafana Alerting** — `healthcheck.sh` + Prometheus
-   Alertmanager notifications.
+   `nextcloud.log` to automatically ban brute-force / credential-stuffing IPs via UFW.
+2. **Brotli Compression + TLS 1.3 Hardening with OCSP Stapling** — strict cipher
+   suites, HSTS preload, Perfect Forward Secrecy (target: A+ on SSL Labs).
+3. **ClamAV Antivirus Auto-Scanning** — every upload (Web, WebDAV, Desktop/Mobile
+   clients) is scanned in real-time by `clamd` before being stored.
+4. **Automated OCC Maintenance** — systemd timers run `cron.php` every 5 minutes
+   plus daily maintenance (`db:*`, `preview:pre-generate`, `files:scan --all`,
+   orphan cleanup).
+5. **Encrypted Backup with Retention & Integrity** — AES-256 encrypted archives,
+   SHA-256 verification, rotation (7 daily / 4 weekly / 12 monthly).
+6. **Centralized Health Checks & Grafana Alerting** — automated health checks plus
+   Prometheus Alertmanager notifications on service degradation or storage >85%.
+
+### Extras
+
+- **Custom Nextcloud app `otp-register`** — OTP email verification via Resend API
+  with manual admin approval (`occ otp-register:approve`).
+- **Google Cloud Storage** — optional S3-compatible external storage mount.
+- **Demo page** — static login page served at `/demo/` for showcase purposes.
 
 ## Repository Layout
 
@@ -56,7 +68,7 @@ cloudvault/
 │   ├── fail2ban/ (jail.d + filter.d)
 │   ├── ufw/ (ufw-setup.sh, certbot-renew-hook.sh)
 │   └── prometheus/ (prometheus.yml, alert.rules.yml)
-├── docs/                      # documentation
+├── docs/                      # full documentation
 │   ├── INSTALLATION.md
 │   ├── DEPLOYMENT.md
 │   ├── SYSTEM_ARCHITECTURE.md
@@ -64,7 +76,6 @@ cloudvault/
 │   ├── PERFORMANCE.md
 │   ├── BACKUP.md
 │   └── MONITORING.md
-├── backup/                    # backup staging (production: /opt/cloudvault/backup)
 ├── benchmark/                 # benchmark.sh + results
 ├── web/demo/                  # static demo login page (portfolio showcase)
 └── apps/                      # custom Nextcloud apps
@@ -87,8 +98,8 @@ sudo bash scripts/healthcheck.sh
 curl -sI https://cloud.example.com | grep -i strict-transport-security
 ```
 
-> Read **[INSTALLATION.md](INSTALLATION.md)** for prerequisites and step-by-step
-> phases, and **[DEPLOYMENT.md](DEPLOYMENT.md)** for post-install verification.
+> Read **[INSTALLATION.md](docs/INSTALLATION.md)** for prerequisites and step-by-step
+> phases, and **[DEPLOYMENT.md](docs/DEPLOYMENT.md)** for post-install verification.
 
 ## Operations Cheat-Sheet
 
@@ -107,13 +118,13 @@ systemctl list-timers cloudvault-*                    # scheduled tasks
 
 | Document | Purpose |
 |----------|---------|
-| [INSTALLATION.md](INSTALLATION.md) | Prerequisites + phased installation |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | Post-install verification & go-live |
-| [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) | Architecture, flow, diagrams |
-| [SECURITY.md](SECURITY.md) | Hardening, firewall, Fail2ban, AV |
-| [PERFORMANCE.md](PERFORMANCE.md) | Tuning, compression, benchmarking |
-| [BACKUP.md](BACKUP.md) | Backup/restore strategy & recovery |
-| [MONITORING.md](MONITORING.md) | Prometheus, Grafana, alerting |
+| [INSTALLATION.md](docs/INSTALLATION.md) | Prerequisites + phased installation |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Post-install verification & go-live |
+| [SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md) | Architecture, flow, diagrams |
+| [SECURITY.md](docs/SECURITY.md) | Hardening, firewall, Fail2ban, AV |
+| [PERFORMANCE.md](docs/PERFORMANCE.md) | Tuning, compression, benchmarking |
+| [BACKUP.md](docs/BACKUP.md) | Backup/restore strategy & recovery |
+| [MONITORING.md](docs/MONITORING.md) | Prometheus, Grafana, alerting |
 
 ---
 
