@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudVault — Sign in</title>
+    <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+    <div class="card">
+        <div class="logo">CV</div>
+        <h1>Welcome to CloudVault</h1>
+        <p class="subtitle">Sign in to your self-hosted cloud storage.</p>
+
+        <form id="login-form" autocomplete="on">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" autocomplete="username" required>
+
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" autocomplete="current-password" required>
+
+            <button type="submit" id="submit-btn">Sign in</button>
+        </form>
+
+        <p class="msg" id="msg" role="alert"></p>
+
+        <div class="demo">
+            Demo credentials &mdash; username <code>demo</code>, password <code>cloudvault</code>
+        </div>
+    </div>
+
+    <script src="assets/login.js"></script>
+</body>
+</html>

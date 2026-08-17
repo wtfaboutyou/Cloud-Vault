@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# CloudVault - Prometheus configuration
+# Location: /etc/prometheus/prometheus.yml
+#
+# All exporters are bound to 127.0.0.1 only. Grafana is published behind the
+# Nginx TLS reverse proxy (never expose ports 9090/3000 publicly).
+# ---------------------------------------------------------------------------
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    site: cloudvault
+
+rule_files:
+  - /etc/prometheus/alert.rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['127.0.0.1:9093']
+
+scrape_configs:
+  - job_name: node
+    static_configs:
+      - targets: ['127.0.0.1:9100']   # prometheus-node-exporter
+
+  - job_name: nginx
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['127.0.0.1:9113']   # nginx-prometheus-exporter (stub_status)
+
+  - job_name: postgres
+    static_configs:
+      - targets: ['127.0.0.1:9187']   # prometheus-postgres-exporter
+
+  - job_name: redis
+    static_configs:
+      - targets: ['127.0.0.1:9121']   # prometheus-redis-exporter

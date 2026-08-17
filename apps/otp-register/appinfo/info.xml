@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<info>
+    <id>otp-register</id>
+    <name>OTP Register (Resend)</name>
+    <summary>Email a 6-digit OTP to new users, then require manual admin approval before login.</summary>
+    <description>Custom Nextcloud app that generates a 6-digit One Time Password and emails it through the Resend API so new accounts can verify their email address during registration. Verified requests stay disabled until an administrator approves them via occ otp-register:approve. Does not modify Nextcloud core.</description>
+    <version>1.1.0</version>
+    <licence>agpl</licence>
+    <author>CloudVault</author>
+    <namespace>OtpRegister</namespace>
+    <category>security</category>
+    <website>https://example.com</website>
+    <bugs>https://example.com</bugs>
+    <repository type="git">https://example.com</repository>
+    <dependencies>
+        <nextcloud min-version="26" max-version="34"/>
+    </dependencies>
+    <screenshot>https://example.com/otp.png</screenshot>
+    <commands>
+        <command>OCA\OtpRegister\Command\PendingRegistrations</command>
+        <command>OCA\OtpRegister\Command\ApproveRegistration</command>
+        <command>OCA\OtpRegister\Command\RejectRegistration</command>
+    </commands>
+    <default_enable/>
+</info>

@@ -1,0 +1,129 @@
+/* CloudVault demo login */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    height: 100%;
+}
+
+body {
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #1e3a5f 0%, #0d1b2a 55%, #070d17 100%);
+    color: #e8eef7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+}
+
+.card {
+    width: 100%;
+    max-width: 400px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    padding: 40px 36px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.logo {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #3b82f6, #22d3ee);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 20px;
+    color: #fff;
+    margin-bottom: 20px;
+}
+
+h1 {
+    font-size: 22px;
+    font-weight: 650;
+    margin-bottom: 6px;
+}
+
+.subtitle {
+    font-size: 13px;
+    color: #93a5bd;
+    margin-bottom: 28px;
+    line-height: 1.5;
+}
+
+label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #93a5bd;
+    margin: 16px 0 6px;
+}
+
+input {
+    width: 100%;
+    padding: 12px 14px;
+    font-size: 14px;
+    color: #e8eef7;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+input:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+button {
+    width: 100%;
+    margin-top: 24px;
+    padding: 12px 14px;
+    font-size: 14px;
+    font-weight: 650;
+    color: #fff;
+    background: linear-gradient(135deg, #2563eb, #0891b2);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+}
+
+button:hover { opacity: 0.92; }
+button:active { transform: translateY(1px); }
+button:disabled { opacity: 0.6; cursor: wait; }
+
+.msg {
+    min-height: 20px;
+    margin-top: 14px;
+    font-size: 13px;
+    text-align: center;
+}
+
+.msg.error { color: #f87171; }
+.msg.success { color: #34d399; }
+
+.demo {
+    margin-top: 22px;
+    padding: 12px 14px;
+    font-size: 12px;
+    color: #93a5bd;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 10px;
+    text-align: center;
+    border: 1px dashed rgba(255, 255, 255, 0.12);
+}
+
+.demo code {
+    color: #67e8f9;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+}
