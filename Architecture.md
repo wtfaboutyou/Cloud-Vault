@@ -141,7 +141,7 @@ cloud-vault/
 
 ### Phase 7 — Backup & Maintenance
 
-- [ ] Create Backup Script
+- [x] Create Backup Script
 - [x] Create Restore Script
 - [x] Configure Cron Jobs
 - [x] Configure Health Check
