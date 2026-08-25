@@ -23,8 +23,6 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 | Backup         | AES-256 Encrypted Archives + SHA-256 Verification + Retention     |
 
 **Custom Components:**
-- **Custom Nextcloud App `otp-register`** — OTP email verification via Resend API dengan manual admin approval (`occ otp-register:approve`)
-- **Google Cloud Storage** — Optional S3-compatible external storage mount
 - **Demo Page** — Static login page di `/demo/` untuk showcase portfolio
 
 ---
@@ -36,7 +34,6 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 | Tampilan | Deskripsi |
 |----------|-----------|
 | ![Dashboard Nextcloud](docs/assets/screenshots/dashboard.png) | Dashboard Nextcloud setelah login |
-| ![OTP Registration](docs/assets/screenshots/otp-register.png) | Halaman registrasi OTP custom |
 | ![Grafana Dashboard](docs/assets/screenshots/grafana.png) | Monitoring dashboard Grafana |
 | ![Demo Page](docs/assets/screenshots/demo-page.png) | Static demo page di `/demo/` |
 
@@ -49,10 +46,10 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 ### Prasyarat
 
 - **OS:** Debian 13 (Trixie) fresh minimal install, root + non-root sudo user
-- **Domain:** FQDN dengan A/AAAA record menunjuk ke server
 - **Spec Minimum:** 2 vCPU / 4 GB RAM (8 GB recommended dengan ClamAV)
 - **Storage:** 50 GB root + dedicated data volume untuk `/var/www/nextcloud/data`
-- **Network:** Port 80, 443 reachable dari internet; Port 22 dari admin networks
+- **Network:** Port 80, 443 (local network); Port 22 dari admin networks
+- **TLS:** Self-signed certificate (Let's Encrypt butuh domain publik)
 
 ### Langkah-langkah Deployment
 
@@ -63,13 +60,12 @@ scp -r cloudvault root@<server>:/opt/cloudvault
 # 2. Masuk ke direktori project
 cd /opt/cloudvault
 
-# 3. Set environment variables & jalankan installer lengkap
-NC_DOMAIN=cloud.example.com ADMIN_EMAIL=admin@example.com \
-  sudo bash scripts/install.sh all
+# 3. Jalankan installer lengkap (tanpa domain, pakai self-signed cert)
+sudo bash scripts/install.sh all
 
 # 4. Verifikasi instalasi
 sudo bash scripts/healthcheck.sh
-curl -sI https://cloud.example.com | grep -i strict-transport-security
+curl -skI https://localhost | grep -i strict-transport-security
 ```
 
 ### Install Bertahap (Optional)
@@ -87,15 +83,7 @@ sudo bash scripts/install.sh database
 # Phase 3b: Nextcloud core
 sudo bash scripts/install.sh nextcloud
 
-# Phase 3c: OTP Registration (butuh RESEND_API_KEY)
-RESEND_API_KEY=re_xxxx RESEND_FROM="CloudVault <verify@example.com>" \
-  sudo bash scripts/install.sh register
-
-# Phase 3d: Google Cloud Storage (optional)
-GCS_BUCKET=<bucket> GCS_ACCESS_KEY=<key> GCS_SECRET=<secret> \
-  sudo bash scripts/install.sh gcs
-
-# Phase 4: Nginx, TLS, Brotli, PHP tuning
+# Phase 4: Nginx, TLS (self-signed), Brotli, PHP tuning
 sudo bash scripts/install.sh web
 
 # Phase 5: Security hardening (UFW, Fail2ban, SSH)
@@ -127,10 +115,10 @@ php /var/www/nextcloud/occ status
 sudo -u www-data php /var/www/nextcloud/occ app:list | grep -i antivirus
 
 # Cek security headers
-curl -sI https://cloud.example.com | grep -iE 'strict-transport|content-security'
+curl -skI https://localhost | grep -iE 'strict-transport|content-security'
 ```
 
-Buka `https://cloud.example.com` dan login dengan kredensial admin.
+Buka `https://<SERVER_IP>` atau `https://localhost` (di server) dan login dengan kredensial admin. Browser akan warning self-signed cert — klik "Advanced" → "Proceed".
 
 > Dokumentasi lengkap: [INSTALLATION.md](docs/INSTALLATION.md) | [DEPLOYMENT.md](docs/DEPLOYMENT.md)
 
@@ -138,12 +126,23 @@ Buka `https://cloud.example.com` dan login dengan kredensial admin.
 
 ## 4. Link Demo Live
 
-> **Placeholder** — Link demo live akan ditambahkan setelah project di-deploy.
+> **Self-hosted (local network)** — Project ini dijalankan di server sendiri, tidak di-hosting publik. Tanpa domain, akses via IP server.
 
-- **Production:** `https://cloud.example.com` (ganti dengan domain actual)
-- **Demo Page:** `https://cloud.example.com/demo/`
-- **Grafana:** `https://cloud.example.com/grafana/` (jika monitoring enabled)
-- **OTP Registration:** `https://cloud.example.com/apps/otp-register/`
+Akses setelah instalasi:
+- **Production:** `https://<SERVER_IP>` (contoh: `https://192.168.1.100`)
+- **Demo Page:** `https://<SERVER_IP>/demo/`
+- **Grafana:** `https://<SERVER_IP>/grafana/` (jika monitoring enabled)
+
+> **Catatan:** Browser akan warning "Your connection is not private" karena self-signed certificate. Klik **Advanced → Proceed** untuk lanjut.
+
+Untuk demo sementara ke publik tanpa port forwarding:
+```bash
+# cloudflared (gratis, no account needed)
+cloudflared tunnel --url https://localhost
+
+# atau ngrok
+ngrok http https://localhost
+```
 
 ---
 
@@ -160,15 +159,13 @@ Buka `https://cloud.example.com` dan login dengan kredensial admin.
 ```
 cloudvault/
 ├── README.md                    # Project overview (this file)
-├── scripts/                     # Deployment & operations scripts
+├── scripts/                       # Deployment & operations scripts
 │   ├── install.sh              # Phased installer (prep → backup)
 │   ├── backup.sh               # Encrypted backup + retention
 │   ├── restore.sh              # Disaster recovery
 │   ├── healthcheck.sh          # Service/disk/memory/SSL status
 │   ├── healthcheck-prom.sh     # Prometheus-formatted healthcheck
 │   ├── maintenance.sh          # Daily OCC maintenance tasks
-│   ├── otp-send.sh             # CLI helper untuk send OTP
-│   ├── gcs-storage.sh          # GCS mount helper
 │   └── benchmark/              # Benchmark scripts
 ├── config/                      # Production configuration files
 │   ├── nginx/
@@ -188,12 +185,7 @@ cloudvault/
 │   ├── MONITORING.md
 │   ├── DEMO_VIDEO.md
 │   └── assets/                  # Screenshots, diagrams (to be added)
-├── apps/                        # Custom Nextcloud apps
-│   └── otp-register/            # OTP email verification + admin approval
-│       ├── appinfo/
-│       ├── lib/
-│       ├── templates/
-│       └── js/
+├── apps/                        # Custom Nextcloud apps (empty)
 ├── web/                         # Static web assets
 │   └── demo/                    # Demo login page (portfolio showcase)
 │       ├── index.html
@@ -215,15 +207,8 @@ sudo bash /opt/cloudvault/scripts/restore.sh           # Restore latest archive
 sudo bash /opt/cloudvault/scripts/healthcheck.sh       # Full health report
 sudo bash /opt/cloudvault/scripts/maintenance.sh       # Run maintenance manually
 
-# GCS Mount
-GCS_BUCKET=<bucket> GCS_ACCESS_KEY=<key> GCS_SECRET=<secret> \
-  sudo bash /opt/cloudvault/scripts/install.sh gcs
-
 # Scheduled Tasks
 systemctl list-timers cloudvault-*
-
-# OTP Registration CLI
-sudo bash /opt/cloudvault/scripts/otp-send.sh user@example.com
 ```
 
 ---

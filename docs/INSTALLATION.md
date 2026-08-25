@@ -12,7 +12,7 @@ also callable independently, which lets you pause, verify, and resume.
 - **Hardware**: 2 vCPU / 4 GB RAM minimum (8 GB recommended; 16 GB with heavy ClamAV).
 - **Storage**: 50 GB free on root, plus a data volume for `/var/www/nextcloud/data`.
 - **Swap**: ≥ 2 GB (`fallocate -l 2G /swapfile && mkswap /swapfile && swapon /swapfile`).
-- **Domain**: FQDN with `A`/`AAAA` record → server public IP.
+- **Domain**: Optional FQDN with `A`/`AAAA` record → server public IP. Works without domain using self-signed TLS (access via IP).
 - **Network**: inbound `80/tcp` and `443/tcp`; `22/tcp` from admin networks only.
 - **Fresh Debian 13** minimal install with `root` and a non-root sudo user.
 - **Time**: `timedatectl set-timezone <Region/City>` and `systemctl enable --now chrony`.
@@ -48,8 +48,8 @@ Set overrides before running (defaults are generated automatically if omitted):
 
 | Variable               | Default                        | Purpose                          |
 |------------------------|--------------------------------|----------------------------------|
-| `NC_DOMAIN`            | `cloud.example.com`            | Nextcloud FQDN                   |
-| `ADMIN_EMAIL`          | `webmaster@$NC_DOMAIN`         | Let's Encrypt contact            |
+| `NC_DOMAIN`            | `localhost`                    | Nextcloud FQDN (or server IP)    |
+| `ADMIN_EMAIL`          | `admin@localhost`              | Let's Encrypt contact (ignored for self-signed) |
 | `NC_ADMIN_USER`        | `admin`                        | Initial admin login              |
 | `NC_ADMIN_PASS`        | random                         | Initial admin password           |
 | `NC_DB_NAME/USER`      | `nextcloud`                    | PostgreSQL database              |
@@ -58,11 +58,7 @@ Set overrides before running (defaults are generated automatically if omitted):
 | `ADMIN_IP_WHITELIST`   | empty                          | Restrict SSH to admin IP         |
 | `ENABLE_MONITORING`    | `no`                           | Install Prometheus/Grafana       |
 | `TZ`                   | `Etc/UTC`                      | System timezone                  |
-| `GCS_BUCKET`           | empty                          | GCS bucket (enables Phase 3d)    |
-| `GCS_ACCESS_KEY`       | empty                          | GCS HMAC access key              |
-| `GCS_SECRET`           | empty                          | GCS HMAC secret key              |
-| `GCS_REGION`           | `auto`                         | GCS region (leave `auto`)        |
-| `GCS_MOUNTPOINT`       | `/gcs`                         | Nextcloud mountpoint for bucket  |
+
 
 Generated secrets are written to `/opt/cloudvault/.secrets/cloudvault.env`.
 
@@ -114,56 +110,6 @@ sudo bash scripts/install.sh nextcloud
 - Runs `occ maintenance:install` with the admin account.
 - Installs the 5-minute cron entry for background jobs.
 - Saves generated credentials to `.secrets/cloudvault.env`.
-
-### Phase 3c — OTP registration via Resend (manual approval)
-
-```bash
-RESEND_API_KEY=re_xxxx RESEND_FROM="CloudVault <verify@example.com>" \
-  sudo bash scripts/install.sh register
-```
-
-- Installs and enables the `otp-register` app into `/var/www/nextcloud/apps`.
-- Wires the Resend API key / sender address via `occ config:app:set`.
-- Registration is **manual**: a 6-digit verification code is emailed to confirm
-  the address, but the account is **not** enabled automatically. The request is
-  queued and an administrator must approve it before the user can log in:
-  - List pending requests: `occ otp-register:pending`
-  - Approve / enable:     `occ otp-register:approve <username>`
-  - Reject / remove:      `occ otp-register:reject <username>`
-- Public registration page: `https://<domain>/apps/otp-register/`.
-- Standalone CLI helper: `sudo bash scripts/otp-send.sh user@example.com`.
-
-See [PERFORMANCE.md](PERFORMANCE.md) and the app under `apps/otp-register/`.
-
-### Phase 3d — Google Cloud Storage external storage (S3-compatible)
-
-Mount a Google Cloud Storage bucket into Nextcloud using GCS's S3-compatible
-endpoint and the stock `AmazonS3` backend (no extra package needed).
-
-Prerequisites in the GCP console:
-1. Create a bucket: `gsutil mb gs://<bucket>`
-2. Create an HMAC access/secret key for a Service Account:
-   `gcloud storage hmac create <service-account-email>`
-
-Then run the phase through the installer (optional — skipped when `GCS_BUCKET`
-is empty):
-
-```bash
-GCS_BUCKET=<bucket> GCS_ACCESS_KEY=<key> GCS_SECRET=<secret> \
-  sudo bash scripts/install.sh gcs
-```
-
-Or deploy everything including GCS in one go:
-
-```bash
-GCS_BUCKET=<bucket> GCS_ACCESS_KEY=<key> GCS_SECRET=<secret> \
-  sudo bash scripts/install.sh all
-```
-
-- Enables `files_external`, creates a system-wide mount `/gcs` → `gs://<bucket>`
-  pointing at `https://storage.googleapis.com` (TLS, path-style requests).
-  Override the mountpoint with `GCS_MOUNTPOINT`, e.g. `/archive`.
-- Verify in admin UI: **Settings → External storages**.
 
 ### Phase 4 — Nginx, TLS, Brotli, PHP tuning
 
@@ -224,9 +170,12 @@ ENABLE_MONITORING=yes sudo bash scripts/install.sh monitoring
 ### Full deployment
 
 ```bash
-NC_DOMAIN=cloud.example.com ADMIN_EMAIL=admin@example.com \
+NC_DOMAIN=localhost ADMIN_EMAIL=admin@localhost \
   sudo bash scripts/install.sh all
 ```
+
+> **Without a domain**: Run with `NC_DOMAIN=<server-ip>` and `ENABLE_LETSENCRYPT=no`.
+> The installer will use a self-signed certificate. Access via `https://<server-ip>`.
 
 ---
 
@@ -237,10 +186,10 @@ systemctl status nginx php8.4-fpm postgresql redis-server fail2ban clamav-daemon
 sudo bash /opt/cloudvault/scripts/healthcheck.sh
 php /var/www/nextcloud/occ status
 sudo -u www-data php /var/www/nextcloud/occ app:list | grep -i antivirus
-curl -sI https://cloud.example.com | grep -iE 'strict-transport|content-security'
+curl -sI https://localhost | grep -iE 'strict-transport|content-security'
 ```
 
-Open `https://cloud.example.com` and complete the initial admin login.
+Open `https://localhost` (or `https://<server-ip>`) and complete the initial admin login.
 
 ---
 

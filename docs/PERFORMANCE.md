@@ -131,7 +131,7 @@ Expected: brotli < gzip < plain for text assets.
 compression sizes, and throughput:
 
 ```bash
-bash /opt/cloudvault/benchmark/benchmark.sh https://cloud.example.com
+bash /opt/cloudvault/benchmark/benchmark.sh https://localhost
 ```
 
 Results are written to `benchmark/results/`.

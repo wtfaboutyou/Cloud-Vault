@@ -67,8 +67,7 @@ cloudvault/
 ├── backup/                    # backup staging (production: /opt/cloudvault/backup)
 ├── benchmark/                 # benchmark.sh + results
 ├── web/demo/                  # static demo login page (portfolio showcase)
-└── apps/                      # custom Nextcloud apps
-    └── otp-register/           # OTP email verification + admin approval
+└── apps/                      # custom Nextcloud apps (empty)
 ```
 
 ## Quick Start
@@ -79,13 +78,15 @@ scp -r cloudvault root@<server>:/opt/
 
 # 2. Set required variables and run the full installer
 cd /opt/cloudvault
-NC_DOMAIN=cloud.example.com ADMIN_EMAIL=admin@example.com \
+NC_DOMAIN=localhost ADMIN_EMAIL=admin@localhost \
   sudo bash scripts/install.sh all
 
 # 3. Verify
 sudo bash scripts/healthcheck.sh
-curl -sI https://cloud.example.com | grep -i strict-transport-security
+curl -sI https://localhost | grep -i strict-transport-security
 ```
+
+> **Without a domain**: Use `NC_DOMAIN=<server-ip>` and the installer will use a self-signed certificate. Access via `https://<server-ip>`.
 
 > Read **[INSTALLATION.md](INSTALLATION.md)** for prerequisites and step-by-step
 > phases, and **[DEPLOYMENT.md](DEPLOYMENT.md)** for post-install verification.
@@ -98,9 +99,7 @@ sudo bash /opt/cloudvault/scripts/backup.sh verify     # verify latest archive
 sudo bash /opt/cloudvault/scripts/restore.sh           # restore latest archive
 sudo bash /opt/cloudvault/scripts/healthcheck.sh       # full health report
 sudo bash /opt/cloudvault/scripts/maintenance.sh       # run maintenance manually
-GCS_BUCKET=<bucket> GCS_ACCESS_KEY=<key> GCS_SECRET=<secret> \
-  sudo bash /opt/cloudvault/scripts/install.sh gcs     # mount GCS bucket
-systemctl list-timers cloudvault-*                    # scheduled tasks
+systemctl list-timers cloudvault-*                     # scheduled tasks
 ```
 
 ## Documentation Index
@@ -120,7 +119,7 @@ systemctl list-timers cloudvault-*                    # scheduled tasks
 ## Requirements
 
 - Debian 13 (Trixie) fresh minimal install, root + non-root sudo user
-- FQDN with A/AAAA record pointing to the server
+- **FQDN optional**: Use a domain for Let's Encrypt TLS, or run without domain using self-signed certificate (access via IP)
 - 2 vCPU / 4 GB RAM minimum (8 GB recommended with ClamAV)
 - 50 GB root storage + dedicated data volume for `/var/www/nextcloud/data`
-- Ports 80, 443 reachable from the internet; 22 from admin networks
+- Ports 80, 443 reachable from the internet (only required for Let's Encrypt); 22 from admin networks

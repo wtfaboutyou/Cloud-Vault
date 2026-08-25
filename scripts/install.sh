@@ -10,8 +10,6 @@
 #   packages     Phase 2 : PHP 8.4, Nginx, PostgreSQL, Redis, Fail2ban, ClamAV
 #   database     Phase 3a: PostgreSQL tuning + role, Redis hardening
 #   nextcloud    Phase 3b: Nextcloud code, config.php, occ install
-#   register     Phase 3c: OTP registration via Resend (custom app)
-#   gcs          Phase 3d: Google Cloud Storage external storage (optional)
 #   web          Phase 4 : Nginx site, Brotli, PHP tuning, TLS (certbot)
 #   security     Phase 5 : UFW, Fail2ban jails, SSH hardening
 #   features     Phase 6 : ClamAV integration + systemd maintenance timers
@@ -27,8 +25,8 @@ DEPLOY_DIR="/opt/cloudvault"
 # ---------------------------------------------------------------------------
 # Configuration (override via environment variables)
 # ---------------------------------------------------------------------------
-NC_DOMAIN="${NC_DOMAIN:-cloud.example.com}"
-ADMIN_EMAIL="${ADMIN_EMAIL:-webmaster@${NC_DOMAIN}}"
+NC_DOMAIN="${NC_DOMAIN:-localhost}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@localhost}"
 NC_PHP_VER="${NC_PHP_VER:-8.4}"
 NC_BASE="${NC_BASE:-/var/www/nextcloud}"
 NC_DATA_DIR="${NC_DATA_DIR:-${NC_BASE}/data}"
@@ -40,16 +38,8 @@ NC_DB_PASS="${NC_DB_PASS:-$(openssl rand -base64 24)}"
 REDIS_PASS="${REDIS_PASS:-$(openssl rand -base64 24)}"
 GRAFANA_DB_PASS="${GRAFANA_DB_PASS:-$(openssl rand -base64 24)}"
 PROM_SCRAPE_SECRET="${PROM_SCRAPE_SECRET:-$(openssl rand -base64 32)}"
-RESEND_API_KEY="${RESEND_API_KEY:-}"        # Resend API key for OTP email (optional)
-RESEND_FROM="${RESEND_FROM:-CloudVault <verify@${NC_DOMAIN}>}"
 
-# Google Cloud Storage external storage (optional, Phase 3d).
-# Requires an HMAC key from the GCP console: gcloud storage hmac create <SA>
-GCS_BUCKET="${GCS_BUCKET:-}"
-GCS_ACCESS_KEY="${GCS_ACCESS_KEY:-}"
-GCS_SECRET="${GCS_SECRET:-}"
-GCS_REGION="${GCS_REGION:-auto}"
-GCS_MOUNTPOINT="${GCS_MOUNTPOINT:-/gcs}"
+
 
 ADMIN_IP_WHITELIST="${ADMIN_IP_WHITELIST:-}"   # e.g. "203.0.113.10/32"
 ENABLE_MONITORING="${ENABLE_MONITORING:-no}"   # Phase 7 is heavy-weight
@@ -298,6 +288,13 @@ EOF
 
   occ config:system:set trusted_domains 0 --value="${NC_DOMAIN}"
 
+  # Disable user registration & lost password
+  occ config:system:set allow_user_registration --value=false --type=boolean
+  occ config:system:set lost_password_link --value=""
+
+  # Disable WebAuthn (Login with device)
+  occ app:disable twofactor_webauthn 2>/dev/null || true
+
   # Background jobs every 5 minutes
   ( crontab -l 2>/dev/null | grep -v 'nextcloud/cron.php'; \
     echo "*/5 * * * * php -f ${NC_BASE}/cron.php" ) | crontab -
@@ -314,77 +311,6 @@ EOF
   } > "${DEPLOY_DIR}/.secrets/cloudvault.env"
 
   log "Nextcloud ready at https://${NC_DOMAIN}"
-}
-
-# ---------------------------------------------------------------------------
-# Phase 3c - OTP registration via Resend (custom app, non-source-modifying)
-# ---------------------------------------------------------------------------
-phase3_register() {
-  require_root
-  log "Phase 3c: OTP registration via Resend"
-
-  local app_src="${SCRIPT_DIR}/../apps/otp-register"
-  local app_dst="${NC_BASE}/apps/otp-register"
-  if [[ ! -d "${app_src}" ]]; then
-    warn "app not found at ${app_src}; skipping OTP app install."
-    return 0
-  fi
-
-  # Place app into Nextcloud and enable it
-  rm -rf "${app_dst}"
-  cp -r "${app_src}" "${app_dst}"
-  chown -R www-data:www-data "${app_dst}"
-  occ app:enable otp-register || occ app:install otp-register || true
-
-  # Configure the Resend credentials (only when a key is supplied)
-  if [[ -n "${RESEND_API_KEY}" ]]; then
-    occ config:app:set otp-register resend_api_key --value="${RESEND_API_KEY}"
-    occ config:app:set otp-register resend_from --value="${RESEND_FROM}"
-    occ config:app:set otp-register otp_ttl_seconds --value=600
-    log "OTP app enabled and wired to Resend (${RESEND_FROM})."
-    log "Registration is MANUAL: verify the email, then approve accounts with:"
-    log "  occ otp-register:pending"
-    log "  occ otp-register:approve <username>"
-    log "  occ otp-register:reject <username>"
-  else
-    warn "RESEND_API_KEY not set - OTP app installed but not sending. Set it, then run:"
-    warn "  occ config:app:set otp-register resend_api_key --value=<key>"
-    warn "  occ config:app:set otp-register resend_from --value=\"CloudVault <verify@your.domain>\""
-  fi
-  log "Phase 3c complete."
-}
-
-# ---------------------------------------------------------------------------
-# Phase 3d - Google Cloud Storage external storage (S3-compatible, optional)
-# ---------------------------------------------------------------------------
-phase3_gcs() {
-  require_root
-  if [[ -z "${GCS_BUCKET}" ]]; then
-    warn "GCS_BUCKET not set - skipping Google Cloud Storage mount."
-    warn "  GCS_BUCKET=<bucket> GCS_ACCESS_KEY=<key> GCS_SECRET=<secret> \\"
-    warn "    sudo bash ${SCRIPT_DIR}/install.sh gcs"
-    return 0
-  fi
-
-  log "Phase 3d: Google Cloud Storage mount ${GCS_MOUNTPOINT} -> gs://${GCS_BUCKET}"
-  if [[ -z "${GCS_ACCESS_KEY}" || -z "${GCS_SECRET}" ]]; then
-    fail "GCS_ACCESS_KEY and GCS_SECRET (HMAC) are required when GCS_BUCKET is set."
-  fi
-
-  occ app:enable files_external || occ app:install files_external || true
-  occ files_external:create "${GCS_MOUNTPOINT}" AmazonS3 AccessKey \
-    --config bucket="${GCS_BUCKET}" \
-    --config key="${GCS_ACCESS_KEY}" \
-    --config secret="${GCS_SECRET}" \
-    --config hostname="storage.googleapis.com" \
-    --config port=443 \
-    --config use_ssl=true \
-    --config use_path_style=true \
-    --config legacy_auth=false \
-    --config region="${GCS_REGION}"
-
-  occ files_external:list
-  log "Phase 3d complete. Verify in admin UI: Settings > External storages."
 }
 
 # ---------------------------------------------------------------------------
@@ -592,14 +518,12 @@ EOF
 deploy_scripts
 case "${1:-all}" in
   all)        phase1_prep; phase2_packages; phase3_database; phase3_nextcloud;
-              phase3_register; phase3_gcs; phase4_web; phase5_security; phase6_features;
+              phase4_web; phase5_security; phase6_features;
               phase8_backup; phase7_monitoring ;;
   prep)       phase1_prep ;;
   packages)   phase2_packages ;;
   database)   phase3_database ;;
   nextcloud)  phase3_nextcloud ;;
-  register)   phase3_register ;;
-  gcs)        phase3_gcs ;;
   web)        phase4_web ;;
   security)   phase5_security ;;
   features)   phase6_features ;;
