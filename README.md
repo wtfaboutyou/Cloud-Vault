@@ -22,8 +22,6 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 | Monitoring     | Prometheus + Grafana + Exporters                                  |
 | Backup         | AES-256 Encrypted Archives + SHA-256 Verification + Retention     |
 
-**Custom Components:**
-- **Demo Page** — Static login page di `/demo/` untuk showcase portfolio
 
 ---
 
@@ -35,7 +33,6 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 |----------|-----------|
 | ![Dashboard Nextcloud](docs/assets/screenshots/dashboard.png) | Dashboard Nextcloud setelah login |
 | ![Grafana Dashboard](docs/assets/screenshots/grafana.png) | Monitoring dashboard Grafana |
-| ![Demo Page](docs/assets/screenshots/demo-page.png) | Static demo page di `/demo/` |
 
 **Video Demo:** `[Link video demo akan ditambahkan di sini]`
 
@@ -130,7 +127,6 @@ Buka `https://<SERVER_IP>` atau `https://localhost` (di server) dan login dengan
 
 Akses setelah instalasi:
 - **Production:** `https://<SERVER_IP>` (contoh: `https://192.168.1.100`)
-- **Demo Page:** `https://<SERVER_IP>/demo/`
 - **Grafana:** `https://<SERVER_IP>/grafana/` (jika monitoring enabled)
 
 > **Catatan:** Browser akan warning "Your connection is not private" karena self-signed certificate. Klik **Advanced → Proceed** untuk lanjut.
@@ -150,7 +146,7 @@ ngrok http https://localhost
 
 > **Placeholder** — Link ke halaman project di Edusoft Portfolio akan ditambahkan manual.
 
-- **Portfolio Page:** `[URL Edusoft Portfolio Project Page]`
+- **Portfolio Page:** `[https://portfolio.edusoftcenter.com/contributors/1908d892-5a79-406a-b529-c2573398da59]`
 
 ---
 
