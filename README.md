@@ -146,7 +146,7 @@ ngrok http https://localhost
 
 > **Placeholder** — Link ke halaman project di Edusoft Portfolio akan ditambahkan manual.
 
-- **Portfolio Page:** `[https://portfolio.edusoftcenter.com/contributors/1908d892-5a79-406a-b529-c2573398da59]`
+- **Portfolio Page:** [Avrillia Zahra Khoirun Nisa](https://portfolio.edusoftcenter.com/contributors/1908d892-5a79-406a-b529-c2573398da59)
 
 ---
 
