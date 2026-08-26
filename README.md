@@ -176,14 +176,6 @@ Akses setelah instalasi:
 
 > **Catatan:** Browser akan warning "Your connection is not private" karena self-signed certificate. Klik **Advanced → Proceed** untuk lanjut.
 
-Untuk demo sementara ke publik tanpa port forwarding:
-```bash
-# cloudflared (gratis, no account needed)
-cloudflared tunnel --url https://localhost
-
-# atau ngrok
-ngrok http https://localhost
-```
 
 ---
 
