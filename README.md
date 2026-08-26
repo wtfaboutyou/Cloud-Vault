@@ -8,6 +8,51 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 
 ---
 
+## 🎯 Masalah yang Memicu Pembuatan CloudVault
+
+### 1. **Kecemasan Privasi Data & Ketergantungan Vendor (Vendor Lock-in)**
+- **Penyimpanan cloud publik** (Google Drive, Dropbox, OneDrive, iCloud) menyimpan data di infrastruktur pihak ketiga yang tidak sepenuhnya transparan.
+- Organisasi tidak memiliki kontrol penuh atas: lokasi fisik data, kebijakan akses pemerintah (mis. CLOUD Act, GDPR Schrems II), atau perubahan ToS/price hike mendadak.
+- Migrasi keluar (egress) sering sulit, mahal, atau terbatas secara teknis.
+
+### 2. **Biaya Berkelanjutan yang Tidak Terduga**
+- Model *per-user/per-month* pada SaaS enterprise (Google Workspace, Microsoft 365, Box, Egnyte) mengakibatkan biaya operasional (OpEx) yang tumbuh linear dengan jumlah karyawan.
+- Fitur *advanced security, DLP, eDiscovery, retention policies* terkunci di tier paling mahal.
+- Tidak ada opsi *cap-ex* (belum investasi hardware sendiri) untuk organisasi yang punya tim infra & बजट hardware.
+
+### 3. **Kurangnya Kontrol Keamanan & Kepatuhan (Compliance)**
+- Cloud publik menawarkan *shared responsibility model* tapi konfigurasi keamanan granular (CSP header, rate limiting, cipher suite, WAF rules, antivirus scanning per-upload) sering *opinionated* atau tidak bisa di-*customize* penuh.
+- Industri terregulasi (keuangan, kesehatan, pemerintahan, hukum) butuh bukti *audit trail* infrastruktur sendiri: *who accessed what, when, from where, scanned by what AV engine*.
+- *Data residency* laws (UU PDP Indonesia, GDPR EU, HIPAA US) menuntut data tetap di yurisdiksi tertentu — cloud publik sering *multi-region* default.
+
+### 4. **Kompleksitas & Overhead Docker/Kubernetes untuk Workload Sederhana**
+- Banyak deployment Nextcloud modern *assume* Docker Compose / K8s (helm chart), yang menambah layer abstraksi, resource overhead, dan *failure domain* baru (container networking, volume drivers, image supply chain).
+- Untuk tim infra yang sudah mahir Linux bare-metal (APT, systemd, Nginx, PHP-FPM, PostgreSQL), Docker justru menambah *cognitive load* tanpa manfaat isolasi yang signifikan untuk single-tenant app.
+- *Immutable infrastructure* via container cocok untuk microservices skala besar, *overkill* untuk monolith stateful seperti Nextcloud.
+
+### 5. **Ketiadaan "Batteries-Included" Production-Ready Template**
+- Tutorial Nextcloud di internet mayoritas *development-grade*: SQLite, HTTP only, tanpa AV, tanpa backup terenkripsi, tanpa monitoring, tanpa hardening.
+- Menggabungkan Nginx + PHP-FPM + PostgreSQL + Redis + ClamAV + Fail2ban + Prometheus + Backup terenkripsi + OCSP Stapling + Brotli + HSTS preload + rate limiting + log rotation + maintenance timer = **hari-hari kerja manual** yang rentan *drift* dan *human error*.
+- Tidak ada *single source of truth* (config as code) yang *idempotent*, *version-controlled*, dan *tested* untuk di-deploy ulang kapan saja (disaster recovery, staging, scale-out).
+
+---
+
+## ✅ Mengapa Harus Memakai CloudVault (Solusi)
+
+| Tantangan | Solusi CloudVault |
+|-----------|-------------------|
+| **Privasi & Soberanitas Data** | 100% *on-premise / self-hosted*. Data tidak pernah keluar server Anda. Tidak ada telemetri, tidak ada *third-party access*. |
+| **Biaya Terprediksi (CapEx)** | Beli hardware sekali pakai. Hanya biaya listrik, bandwidth, & hardware refresh. *Zero license fee* — stack 100% open source (MIT/AGPL). |
+| **Kontrol Keamanan Penuh** | Hardening *out-of-the-box*: TLS 1.3 only, HSTS preload, CSP, UFW default-deny, Fail2ban (Nextcloud + Nginx + SSH), ClamAV real-time scan, AppArmor, SSH key-only, Redis ACL, PG scram-sha-256. Semua config di `config/` — *auditable, versioned, reproducible*. |
+| **Kepatuhan (Compliance)** | Audit trail lengkap: Nginx access/error log, Nextcloud audit log (`nextcloud.log`), Fail2ban ban log, ClamAV scan log, backup integrity log (SHA-256). Siap untuk *evidence package* auditor. |
+| **Tanpa Docker / Container** | Semua via APT di Debian 13 (Trixie). Systemd native. *Lightweight, transparent, debuggable* — `systemctl status`, `journalctl`, `ss -ltnp` bekerja seperti biasa. |
+| **Performance Production-Grade** | HTTP/2 + Brotli + keepalive, PHP-FPM pool tuned (JIT, opcache, realpath cache), PostgreSQL `random_page_cost=1.1` untuk NVMe, Redis `allkeys-lru`, Nginx `fastcgi_buffering off` untuk streaming upload/download >10GB. Benchmark terukur (lihat `benchmark/results/`). |
+| **Operasional Otomatis** | - **Backup**: AES-256 + PBKDF2, retention 7/4/12 (daily/weekly/monthly), verify SHA-256 otomatis<br>- **Maintenance**: `occ cron` tiap 5 menit + daily `db:add-missing-indices`, `preview:pre-generate`, `files:scan --all` via systemd timer<br>- **Healthcheck**: `healthcheck.sh` cek service, disk, mem, SSL expiry, DB connectivity — output Prometheus-ready<br>- **Monitoring**: Prometheus + Grafana (loopback-only) + Alertmanager (disk >85%, service down, SSL <30 hari) |
+| **Infrastructure as Code** | Semua config di `config/` + installer `scripts/install.sh` (phased, idempotent). *GitOps-ready*: `git clone → sudo bash scripts/install.sh all → done`. Disaster recovery = `scripts/restore.sh` dari backup terenkripsi. |
+| **Showcase Keahlian** | Project ini dibangun sebagai **portfolio bukti kompetensi**: Linux Server Admin, Web Server Architecture (Nginx tuning), Security Hardening (Fail2ban, UFW, TLS, AV), Performance Tuning (PHP, PG, Redis, Nginx), Infrastructure as Code (bash idempotent), Observability (Prometheus/Grafana). |
+
+---
+
 ## 1. Tech Stack
 
 | Layer          | Component / Teknologi                                              |
