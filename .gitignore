@@ -22,3 +22,4 @@ benchmark/results/
 .idea/
 *.swp
 .DS_Store
+nohup.out

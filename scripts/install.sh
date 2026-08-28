@@ -15,6 +15,7 @@
 #   features     Phase 6 : ClamAV integration + systemd maintenance timers
 #   monitoring   Phase 7 : Prometheus, exporters, Grafana (ENABLE_MONITORING=yes)
 #   backup       Phase 8 : backup dir + AES-256 encryption key
+#   watchtower   Phase 9 : Watchtower foundation service (ENABLE_WATCHTOWER=yes)
 #
 set -uo pipefail
 
@@ -43,6 +44,8 @@ PROM_SCRAPE_SECRET="${PROM_SCRAPE_SECRET:-$(openssl rand -base64 32)}"
 
 ADMIN_IP_WHITELIST="${ADMIN_IP_WHITELIST:-}"   # e.g. "203.0.113.10/32"
 ENABLE_MONITORING="${ENABLE_MONITORING:-no}"   # Phase 7 is heavy-weight
+ENABLE_WATCHTOWER="${ENABLE_WATCHTOWER:-no}"   # Phase 9 - Watchtower foundation
+ENABLE_TELEGRAM="${ENABLE_TELEGRAM:-no}"   # Phase 10 - Telegram foundation
 
 LOG_DIR="/var/log/cloudvault"
 LOG="${LOG_DIR}/install.log"
@@ -434,9 +437,11 @@ T
   cat > /etc/systemd/system/cloudvault-backup.service <<SVC
 [Unit]
 Description=CloudVault encrypted backup
+After=cloudvault-watchtower.service
 
 [Service]
 Type=oneshot
+EnvironmentFile=-/opt/cloudvault/.secrets/watchtower.env
 ExecStart=${DEPLOY_DIR}/scripts/backup.sh
 SVC
   cat > /etc/systemd/system/cloudvault-backup.timer <<T
@@ -513,13 +518,253 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Phase 9 - Watchtower foundation (optional)
+# ---------------------------------------------------------------------------
+phase9_watchtower() {
+  require_root
+  if [[ "${ENABLE_WATCHTOWER}" != "yes" ]]; then
+    warn "Set ENABLE_WATCHTOWER=yes to install Watchtower foundation."
+    return 0
+  fi
+
+  log "Phase 9: Watchtower foundation service"
+
+  # Install Python dependencies
+  apt_quiet install -y python3 python3-pip python3-venv
+  pip3 install --quiet aiohttp python-systemd 2>/dev/null || true
+
+  # Create watchtower user if not exists
+  id watchtower >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d /opt/cloudvault/watchtower -c "CloudVault Watchtower" watchtower
+
+  # Create directories
+  mkdir -p /opt/cloudvault/watchtower /opt/cloudvault/scripts/watchtower /var/log/cloudvault
+  chown -R watchtower:watchtower /opt/cloudvault/watchtower /var/log/cloudvault
+
+  # Deploy systemd unit
+  cp "${CONFIG_DIR}/watchtower/cloudvault-watchtower.service" /etc/systemd/system/
+
+  # Create environment file if not exists
+  if [[ ! -f "${DEPLOY_DIR}/.secrets/watchtower.env" ]]; then
+    mkdir -p "${DEPLOY_DIR}/.secrets"
+    umask 077
+    cat > "${DEPLOY_DIR}/.secrets/watchtower.env" <<EOF
+# CloudVault Watchtower Configuration
+# To add Telegram configuration, set these environment variables:
+#   WATCHTELEGRAM_BOT_TOKEN=<your-bot-token>
+#   WATCHTELEGRAM_WEBHOOK_URL=https://<your-domain>/<bot-token>
+#   WATCHTELEGRAM_ADMIN_USER_ID=<your-telegram-user-id>
+WATCHTOWER_LOG_LEVEL=INFO
+WATCHTOWER_HEALTH_HOST=127.0.0.1
+WATCHTOWER_HEALTH_PORT=9191
+WATCHTOWER_REDIS_URL=redis://127.0.0.1:6379/1
+WATCHTOWER_WATCHDOG_INTERVAL=10
+EOF
+    chmod 600 "${DEPLOY_DIR}/.secrets/watchtower.env"
+    log "Watchtower environment file created: ${DEPLOY_DIR}/.secrets/watchtower.env"
+  fi
+
+  # Deploy watchtower script
+  cp "${SCRIPT_DIR}/watchtower/watchtower.py" /opt/cloudvault/scripts/watchtower/
+  chmod +x /opt/cloudvault/scripts/watchtower/
+  chown -R watchtower:watchtower /opt/cloudvault/scripts/watchtower
+
+  systemctl daemon-reload
+  systemctl enable --now cloudvault-watchtower.service
+
+  log "Phase 9 complete. Watchtower service started."
+}
+
+# ---------------------------------------------------------------------------
+# Phase 10 - Telegram foundation (optional)
+# ---------------------------------------------------------------------------
+phase10_telegram() {
+  require_root
+  if [[ "${ENABLE_TELEGRAM}" != "yes" ]]; then
+    warn "Set ENABLE_TELEGRAM=yes to install Telegram foundation."
+    return 0
+  fi
+
+  log "Phase 10: Telegram bot foundation"
+
+  # Ensure watchtower is already installed
+  if [[ "${ENABLE_WATCHTOWER}" != "yes" ]]; then
+    warn "Warning: Watchtower should be installed before Telegram foundation."
+    warn "Set ENABLE_WATCHTOWER=yes first, then run again."
+  fi
+
+  # Install Python dependencies (aiohttp already included with watchtower)
+  apt_quiet install -y python3-aiohttp 2>/dev/null || true
+
+  # Phase 4 dependency: psycopg2 for PostgreSQL access
+  pip3 install --quiet psycopg2-binary 2>/dev/null || true
+
+  # Create telegram scripts directory
+  mkdir -p /opt/cloudvault/scripts/telegram
+  chown -R watchtower:watchtower /opt/cloudvault/scripts/telegram
+
+  # Deploy Telegram bot script
+  cp "${SCRIPT_DIR}/watchtower/telegram_bot.py" /opt/cloudvault/scripts/telegram/
+  chmod +x /opt/cloudvault/scripts/telegram/telegram_bot.py
+  chown -R watchtower:watchtower /opt/cloudvault/scripts/telegram
+
+  # Deploy telegram_linking.py alongside watchtower.py
+  cp "${SCRIPT_DIR}/watchtower/telegram_linking.py" /opt/cloudvault/scripts/watchtower/
+  chmod 644 /opt/cloudvault/scripts/watchtower/telegram_linking.py
+  chown watchtower:watchtower /opt/cloudvault/scripts/watchtower/telegram_linking.py
+
+  # Generate API keys for linking (idempotent)
+  WATCHTOWER_API_KEY_FILE="${DEPLOY_DIR}/.secrets/watchtower_api.key"
+  WATCHTOWER_INTERNAL_KEY_FILE="${DEPLOY_DIR}/.secrets/watchtower_internal.key"
+  if [[ ! -f "${WATCHTOWER_API_KEY_FILE}" ]]; then
+    umask 077
+    openssl rand -hex 32 > "${WATCHTOWER_API_KEY_FILE}"
+    chmod 600 "${WATCHTOWER_API_KEY_FILE}"
+  fi
+  if [[ ! -f "${WATCHTOWER_INTERNAL_KEY_FILE}" ]]; then
+    umask 077
+    openssl rand -hex 32 > "${WATCHTOWER_INTERNAL_KEY_FILE}"
+    chmod 600 "${WATCHTOWER_INTERNAL_KEY_FILE}"
+  fi
+
+  # Apply Telegram linking database migration
+  log "Applying Telegram linking database schema"
+  local pgver
+  pgver="$(ls /etc/postgresql/ | sort -V | tail -1)"
+  local NC_DB_NAME="${NC_DB_NAME:-nextcloud}"
+  local NC_DB_USER="${NC_DB_USER:-nextcloud}"
+  su - postgres -c "psql -d ${NC_DB_NAME} -f ${SCRIPT_DIR}/../sql/telegram_link.sql" 2>&1 | tee -a "${LOG}" || warn "DB migration may have already been applied"
+
+  # Deploy settings page
+  log "Deploying Telegram settings page"
+  local settings_src="${SCRIPT_DIR}/../web/telegram"
+  local settings_dst="/opt/cloudvault/web/settings"
+  mkdir -p "${settings_dst}"
+  cp -r "${settings_src}/." "${settings_dst}/"
+  chown -R watchtower:watchtower "${settings_dst}"
+
+  # Create Telegram environment configuration if not exists
+  if [[ ! -f "${DEPLOY_DIR}/.secrets/telegram.env" ]]; then
+    mkdir -p "${DEPLOY_DIR}/.secrets"
+    umask 077
+    local API_KEY
+    API_KEY="$(cat "${WATCHTOWER_API_KEY_FILE}")"
+    local INTERNAL_KEY
+    INTERNAL_KEY="$(cat "${WATCHTOWER_INTERNAL_KEY_FILE}")"
+    cat > "${DEPLOY_DIR}/.secrets/telegram.env" <<EOF
+# CloudVault Telegram Bot Configuration
+# Generated during deployment - do not edit manually
+
+# Bot token - obtain from @BotFather in Telegram
+WATCHTELEGRAM_BOT_TOKEN=""
+
+# Webhook URL - must use HTTPS with domain validated by Let's Encrypt
+WATCHTELEGRAM_WEBHOOK_URL=""
+
+# Telegram user ID of admin who can receive notifications
+WATCHTELEGRAM_ADMIN_USER_ID=""
+
+# Bot username for deep links (without @)
+WATCHTELEGRAM_BOT_USERNAME="cloudvaultfbot"
+
+# Webhook server configuration
+WATCHTELEGRAM_WEBHOOK_HOST=127.0.0.1
+WATCHTELEGRAM_WEBHOOK_PORT=9192
+WATCHTELEGRAM_USE_WEBHOOK=true
+
+# Watchtower API (for token validation)
+WATCHTOWER_API_URL=http://127.0.0.1:9191
+WATCHTOWER_INTERNAL_API_KEY=${INTERNAL_KEY}
+
+# PostgreSQL (same DB as Nextcloud)
+WATCHTOWER_POSTGRES_DSN=dbname=${NC_DB_NAME} user=${NC_DB_USER} host=localhost
+WATCHTOWER_API_KEY=${API_KEY}
+WATCHTOWER_SETTINGS_DIR=${settings_dst}
+EOF
+    chmod 600 "${DEPLOY_DIR}/.secrets/telegram.env"
+    log "Telegram environment configuration created: ${DEPLOY_DIR}/.secrets/telegram.env"
+  fi
+
+  # Also update watchtower.env with linking config
+  local WT_ENV="${DEPLOY_DIR}/.secrets/watchtower.env"
+  local API_KEY
+  API_KEY="$(cat "${WATCHTOWER_API_KEY_FILE}" 2>/dev/null || echo '')"
+  local INTERNAL_KEY
+  INTERNAL_KEY="$(cat "${WATCHTOWER_INTERNAL_KEY_FILE}" 2>/dev/null || echo '')"
+  if ! grep -q 'WATCHTOWER_API_KEY' "${WT_ENV}" 2>/dev/null; then
+    cat >> "${WT_ENV}" <<EOF
+
+# Phase 4 - Telegram linking
+WATCHTOWER_POSTGRES_DSN=dbname=${NC_DB_NAME} user=${NC_DB_USER} host=localhost
+WATCHTOWER_API_KEY=${API_KEY}
+WATCHTOWER_INTERNAL_API_KEY=${INTERNAL_KEY}
+WATCHTOWER_SETTINGS_DIR=${settings_dst}
+EOF
+    chmod 600 "${WT_ENV}"
+  fi
+
+  # Configure Nginx for Telegram webhook + settings page
+  NGINX_CONF="/etc/nginx/sites-available/cloudvault.conf"
+  WEBHOOK_LOCATION="
+
+  # Telegram webhook - loopback only, secured by existing TLS
+  location /bot/ {
+    proxy_pass http://127.0.0.1:9192/;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    client_max_body_size 10m;
+    allow 127.0.0.1;
+    deny all;
+  }
+
+  # Telegram settings page + linking API (Phase 4)
+  location /settings/telegram {
+    proxy_pass http://127.0.0.1:9191;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    limit_req zone=api burst=20 nodelay;
+  }
+
+  location /settings/telegram/ {
+    proxy_pass http://127.0.0.1:9191/;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    limit_req zone=api burst=20 nodelay;
+  }
+
+"
+
+  # Check if webhook location already exists
+  if ! grep -q "Telegram webhook" "${NGINX_CONF}" 2>/dev/null; then
+    if grep -q "location /grafana/" "${NGINX_CONF}"; then
+      sed -i "/location \/grafana\//i${WEBHOOK_LOCATION}" "${NGINX_CONF}"
+      log "Nginx configuration updated for Telegram webhook + settings"
+    else
+      warn "Could not find Grafana location in Nginx config to insert webhook block"
+    fi
+  else
+    log "Telegram webhook location already configured in Nginx"
+  fi
+
+  systemctl daemon-reload
+  systemctl enable --now cloudvault-watchtower.service 2>/dev/null || true
+
+  log "Phase 10 complete. Telegram linking infrastructure deployed."
+}
+
+# ---------------------------------------------------------------------------
 # dispatch
 # ---------------------------------------------------------------------------
 deploy_scripts
 case "${1:-all}" in
   all)        phase1_prep; phase2_packages; phase3_database; phase3_nextcloud;
               phase4_web; phase5_security; phase6_features;
-              phase8_backup; phase7_monitoring ;;
+              phase8_backup; phase7_monitoring; phase9_watchtower ;;
   prep)       phase1_prep ;;
   packages)   phase2_packages ;;
   database)   phase3_database ;;
@@ -529,6 +774,8 @@ case "${1:-all}" in
   features)   phase6_features ;;
   monitoring) phase7_monitoring ;;
   backup)     phase8_backup ;;
+  watchtower) phase9_watchtower ;;
+  telegram)   phase10_telegram ;;
   *) echo "Unknown stage: ${1:-}"; exit 2 ;;
 esac
 

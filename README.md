@@ -66,6 +66,7 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 | Security       | UFW + Fail2ban + ClamAV + AppArmor                                |
 | Monitoring     | Prometheus + Grafana + Exporters                                  |
 | Backup         | AES-256 Encrypted Archives + SHA-256 Verification + Retention     |
+| Telegram Bot   | CloudVault Watchtower (real-time alerts & server status)          |
 
 
 ---
@@ -158,6 +159,9 @@ sudo -u www-data php /var/www/nextcloud/occ app:list | grep -i antivirus
 
 # Cek security headers
 curl -skI https://localhost | grep -iE 'strict-transport|content-security'
+
+# Demo 6 Advanced Features
+sudo bash /opt/cloudvault/scripts/demo-features.sh
 ```
 
 Buka `https://<SERVER_IP>` atau `https://localhost` (di server) dan login dengan kredensial admin. Browser akan warning self-signed cert — klik "Advanced" → "Proceed".
@@ -242,6 +246,15 @@ sudo bash /opt/cloudvault/scripts/maintenance.sh       # Run maintenance manuall
 
 # Scheduled Tasks
 systemctl list-timers cloudvault-*
+
+# Watchtower (Telegram Bot)
+sudo systemctl status cloudvault-watchtower            # Check service status
+sudo systemctl restart cloudvault-watchtower           # Restart service
+journalctl -u cloudvault-watchtower -f                 # Live logs
+curl -s http://127.0.0.1:9191/health | python3 -m json.tool  # Health check
+
+# 6 Advanced Features Demo
+sudo bash /opt/cloudvault/scripts/demo-features.sh     # Run all 6 feature demos
 ```
 
 ---
@@ -269,6 +282,138 @@ systemctl list-timers cloudvault-*
 4. **Automated OCC Maintenance** — Systemd timers jalan `cron.php` tiap 5 menit plus daily maintenance (`db:*`, `preview:pre-generate`, `files:scan --all`, orphan cleanup).
 5. **Encrypted Backup dengan Retention & Integrity** — AES-256 encrypted archives, SHA-256 verification, rotation (7 daily / 4 weekly / 12 monthly).
 6. **Centralized Health Checks & Grafana Alerting** — Automated health checks + Prometheus Alertmanager notifikasi saat service degradation atau storage >85%.
+
+---
+
+## CloudVault Watchtower — Telegram Bot Integration
+
+Watchtower adalah layer integrasi operasional yang menghubungkan Telegram dengan infrastruktur monitoring CloudVault. Berjalan sebagai systemd service terpisah, Watchtower menyediakan real-time server status, health checks, metrics, storage info, alerts, dan event notifications langsung ke Telegram.
+
+### Fitur Utama
+
+| Fitur | Deskripsi |
+|-------|-----------|
+| **Telegram Bot Commands** | `/status`, `/health`, `/metrics`, `/storage`, `/jobs`, `/alerts` — semua read-only, authorization-based |
+| **Account Linking** | Token kriptografis SHA-256, single-use, 10-minute expiry. Password tidak pernah dikirim ke Telegram |
+| **Event Notifications** | Backup completed/failed, health alerts, security alerts, storage warnings — route ke semua user yang terhubung |
+| **Alertmanager Webhook** | Menerima alert dari Prometheus Alertmanager, format untuk Telegram, deduplication 5 menit |
+| **Notification Queue** | Redis-backed queue dengan exponential backoff retry, graceful degradation saat Redis unavailable |
+| **Prometheus Metrics** | Watchtower expose metrik internal: notification count, queue depth, uptime, command requests |
+| **Settings Page** | Web UI untuk connect/disconnect Telegram, manage notification preferences per event type |
+| **9 Notification Types** | Backup, Health, Security, Upload, Storage Warning/Critical, Background Job failures |
+
+### Arsitektur
+
+```
+Telegram User
+     │
+     ▼
+Telegram Bot API ◄── webhook/polling ──► CloudVault Watchtower
+                                              │
+                                              ├──► Watchtower Internal API (port 9191)
+                                              │       ├──► PostgreSQL (linking, preferences)
+                                              │       ├──► Prometheus (metrics queries)
+                                              │       └──► systemctl (service status)
+                                              │
+                                              ├──► Alertmanager Webhook (port 9093)
+                                              │       └──► Prometheus Alert Rules
+                                              │
+                                              ├──► Notification Queue (Redis)
+                                              │       └──► Exponential backoff retry
+                                              │
+                                              └──► Event Webhook (port 9191)
+                                                      └──► backup.sh, maintenance.sh
+```
+
+### Perintah Bot
+
+| Command | Auth | Deskripsi |
+|---------|------|-----------|
+| `/start` | No | Welcome message atau validasi linking token |
+| `/help` | No | Daftar semua command |
+| `/status` | Yes | Ringkasan operasional: CPU, memory, services, storage |
+| `/health` | Yes | Kesehatan tiap komponen: Prometheus, Nginx, PostgreSQL, Redis, Fail2ban, ClamAV |
+| `/metrics` | Yes | Metrik resource dari Prometheus: CPU, memory, disk utilization |
+| `/storage` | Yes | Detail penggunaan disk: used, available, total, source |
+| `/jobs` | Yes | Status background job: pg_cron dan systemd timers |
+| `/alerts` | Yes | Alert aktif dari Alertmanager |
+
+### Konfigurasi
+
+```bash
+# Environment variables (di /opt/cloudvault/.secrets/watchtower.env)
+WATCHTELEGRAM_BOT_TOKEN=<token dari @BotFather>
+WATCHTOWER_INTERNAL_API_KEY=<api key untuk internal API>
+WATCHTOWER_POSTGRES_DSN=dbname=nextcloud user=nextcloud host=localhost
+
+# Service management
+sudo systemctl status cloudvault-watchtower
+sudo systemctl restart cloudvault-watchtower
+journalctl -u cloudvault-watchtower -f
+
+# Settings page
+https://<SERVER_IP>:9191/settings/telegram/
+```
+
+---
+
+## Repository Structure
+
+```
+cloudvault/
+├── README.md                    # Project overview (this file)
+├── scripts/                       # Deployment & operations scripts
+│   ├── install.sh              # Phased installer (prep → backup)
+│   ├── backup.sh               # Encrypted backup + retention
+│   ├── restore.sh              # Disaster recovery
+│   ├── healthcheck.sh          # Service/disk/memory/SSL status
+│   ├── healthcheck-prom.sh     # Prometheus-formatted healthcheck
+│   ├── maintenance.sh          # Daily OCC maintenance tasks
+│   ├── demo-features.sh        # 6 Advanced features demo script
+│   ├── benchmark/              # Benchmark scripts
+│   └── watchtower/             # CloudVault Watchtower (Telegram integration)
+│       ├── watchtower.py           # Main service (health, status, metrics, API)
+│       ├── telegram_bot.py         # Telegram bot (webhook/polling, commands)
+│       ├── telegram_linking.py     # Account linking (SHA-256 tokens, PostgreSQL)
+│       ├── notification_queue.py   # Redis-backed notification queue
+│       └── watchtower_metrics.py   # Prometheus metrics for Watchtower
+├── config/                      # Production configuration files
+│   ├── nginx/
+│   ├── php/8.4/fpm/pool.d/
+│   ├── postgresql/17/main/
+│   ├── redis/
+│   ├── fail2ban/
+│   ├── ufw/
+│   ├── prometheus/
+│   ├── grafana/                # Grafana dashboards
+│   └── watchtower/             # Watchtower systemd service
+├── sql/                         # PostgreSQL schemas
+│   └── telegram_link.sql           # Telegram linking tables
+├── web/                         # Static web assets
+│   ├── demo/                    # Demo login page (portfolio showcase)
+│   │   ├── index.html
+│   │   └── assets/
+│   └── telegram/settings/       # Telegram settings page
+│       ├── index.html
+│       └── assets/
+├── tests/                       # Test suite
+│   ├── test_telegram_linking.py
+│   ├── test_alertmanager_integration.py
+│   ├── test_event_notifications.py
+│   ├── test_notification_queue.py
+│   └── test_watchtower_metrics.py
+├── docs/                        # Full documentation
+│   ├── INSTALLATION.md
+│   ├── DEPLOYMENT.md
+│   ├── SYSTEM_ARCHITECTURE.md
+│   ├── SECURITY.md
+│   ├── PERFORMANCE.md
+│   ├── BACKUP.md
+│   ├── MONITORING.md
+│   └── DEMO_VIDEO.md
+├── apps/                        # Custom Nextcloud apps (empty)
+└── benchmark/results/           # Benchmark output files
+```
 
 ---
 

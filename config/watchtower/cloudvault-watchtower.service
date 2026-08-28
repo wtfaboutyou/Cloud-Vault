@@ -1,0 +1,54 @@
+[Unit]
+Description=CloudVault Watchtower
+Documentation=https://github.com/wtfaboutyou/Cloud-Vault
+After=network.target redis-server.service
+Wants=redis-server.service
+
+[Service]
+Type=notify
+User=watchtower
+Group=watchtower
+WorkingDirectory=/opt/cloudvault/watchtower
+EnvironmentFile=-/opt/cloudvault/.secrets/watchtower.env
+ExecStart=/opt/cloudvault/scripts/watchtower/watchtower.py
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStartSec=30
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Resource limits
+MemoryMax=256M
+CPUQuota=50%
+TasksMax=50
+
+# Filesystem access
+ReadWritePaths=/opt/cloudvault/watchtower /var/log/cloudvault
+ReadOnlyPaths=/opt/cloudvault/.secrets /etc/cloudvault /opt/cloudvault/web/settings /opt/cloudvault/scripts /run/postgresql
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloudvault-watchtower
+
+[Install]
+WantedBy=multi-user.target

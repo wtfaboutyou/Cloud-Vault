@@ -37,7 +37,52 @@ LOG_DIR="/var/log/cloudvault"
 LOG="${LOG_DIR}/backup.log"
 mkdir -p "${LOG_DIR}"
 
+# Phase 7 — Event notification configuration
+WATCHTOWER_URL="${WATCHTOWER_URL:-http://127.0.0.1:9191}"
+WATCHTOWER_API_KEY="${WATCHTOWER_API_KEY:-}"
+
 log() { echo "[$(date '+%F %T')] $*" | tee -a "${LOG}"; }
+
+# Phase 7 — Fire-and-forget event notification to Watchtower.
+# Notifications MUST never block or fail the backup operation.
+notify_watchtower() {
+  local event_type="$1" status="$2" detail="$3"
+  shift 3
+  # Optional named parameters: label, size, duration, exit_code
+  local label="" size="" duration="" exit_code=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      label=*)      label="${1#label=}";;
+      size=*)       size="${1#size=}";;
+      duration=*)   duration="${1#duration=}";;
+      exit_code=*)  exit_code="${1#exit_code=}";;
+    esac
+    shift
+  done
+
+  [[ -z "${WATCHTOWER_API_KEY}" ]] && return 0
+
+  local timestamp
+  timestamp="$(date '+%F %T %Z')"
+
+  # Build JSON payload using printf (safe, no jq dependency)
+  local payload
+  payload=$(printf '{"event_type":"%s","status":"%s","detail":"%s","timestamp":"%s"' \
+    "${event_type}" "${status}" "${detail}" "${timestamp}")
+  [[ -n "${label}" ]] && payload="${payload},\"label\":\"${label}\""
+  [[ -n "${size}" ]] && payload="${payload},\"size\":\"${size}\""
+  [[ -n "${duration}" ]] && payload="${payload},\"duration\":\"${duration}\""
+  [[ -n "${exit_code}" ]] && payload="${payload},\"exit_code\":${exit_code}"
+  payload="${payload}}"
+
+  # Fire-and-forget: use timeout + no output check
+  # curl failure is logged but never causes backup to fail
+  timeout 5 curl -s -o /dev/null \
+    -X POST "${WATCHTOWER_URL}/api/events" \
+    -H "Content-Type: application/json" \
+    -H "X-API-Key: ${WATCHTOWER_API_KEY}" \
+    -d "${payload}" >> "${LOG}" 2>&1 || true
+}
 
 require_root() { [[ ${EUID} -eq 0 ]] || { echo "Please run as root." >&2; exit 1; }; }
 
@@ -171,13 +216,40 @@ verify_latest() {
 
 # ---------------------------------------------------------------------------
 require_root
-case "${1:-$(derive_label)}" in
+BACKUP_EXIT_CODE=0
+BACKUP_START=$(date +%s)
+BACKUP_LABEL="${1:-$(derive_label)}"
+case "${BACKUP_LABEL}" in
   daily)   create_backup daily ;;
   weekly)  create_backup weekly ;;
   monthly) create_backup monthly ;;
-  clean)   prune_retention ;;
-  verify)  verify_latest "${2:-latest}" ;;
+  clean)   prune_retention; log "backup.sh finished"; exit 0 ;;
+  verify)  verify_latest "${2:-latest}"; log "backup.sh finished"; exit $? ;;
   *) create_backup "$1";;
 esac
-prune_retention
-log "backup.sh finished"
+BACKUP_EXIT_CODE=$?
+BACKUP_END=$(date +%s)
+BACKUP_DURATION=$(( BACKUP_END - BACKUP_START ))
+
+# Phase 7 — Send event notification to Watchtower (fire-and-forget)
+if (( BACKUP_EXIT_CODE == 0 )); then
+  # Determine backup size (last created .enc file)
+  LATEST_ENC=$(ls -1t "${BACKUP_DIR}/${BACKUP_LABEL}"/cloudvault-${BACKUP_LABEL}-*.tar.enc 2>/dev/null | head -1)
+  BACKUP_SIZE=""
+  if [[ -n "${LATEST_ENC}" ]] && [[ -f "${LATEST_ENC}" ]]; then
+    BACKUP_SIZE=$(du -h "${LATEST_ENC}" | cut -f1)
+  fi
+
+  # Format duration
+  DURATION_FMT="$(( BACKUP_DURATION / 60 ))m $(( BACKUP_DURATION % 60 ))s"
+
+  notify_watchtower "BACKUP_COMPLETED" "success" "Backup ${BACKUP_LABEL} completed" \
+    "label=${BACKUP_LABEL}" "size=${BACKUP_SIZE}" "duration=${DURATION_FMT}"
+  log "backup.sh finished"
+else
+  DURATION_FMT="$(( BACKUP_DURATION / 60 ))m $(( BACKUP_DURATION % 60 ))s"
+  notify_watchtower "BACKUP_FAILED" "error" "Backup ${BACKUP_LABEL} failed" \
+    "label=${BACKUP_LABEL}" "exit_code=${BACKUP_EXIT_CODE}" "duration=${DURATION_FMT}"
+  log "backup.sh finished with errors"
+fi
+exit ${BACKUP_EXIT_CODE}
