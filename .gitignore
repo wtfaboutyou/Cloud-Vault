@@ -23,3 +23,7 @@ benchmark/results/
 *.swp
 .DS_Store
 nohup.out
+
+# AI instructions (not for public repo)
+new-feature.md
+new-featured.md
