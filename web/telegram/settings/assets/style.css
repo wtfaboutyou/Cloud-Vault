@@ -268,8 +268,31 @@ button:disabled {
 
 /* Status badges */
 .status-row {
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
     margin-bottom: 20px;
+}
+
+.btn-text-link {
+    background: none;
+    border: none;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    width: auto;
+    transition: color 0.15s, background 0.15s;
+}
+
+.btn-text-link:hover {
+    color: #94a3b8;
+    background: rgba(255,255,255,0.04);
+    box-shadow: none;
+    transform: none;
 }
 
 .badge {

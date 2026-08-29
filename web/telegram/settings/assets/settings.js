@@ -53,7 +53,9 @@
         tgId: document.getElementById('tg-id'),
         connectedAt: document.getElementById('connected-at'),
         prefsList: document.getElementById('prefs-list'),
-        msg: document.getElementById('msg')
+        msg: document.getElementById('msg'),
+        changeUserBtn: document.getElementById('change-user-btn'),
+        changeUserBtn2: document.getElementById('change-user-btn-2')
     };
 
     // State
@@ -283,6 +285,16 @@
     els.connectBtn.addEventListener('click', generateToken);
     els.refreshBtn.addEventListener('click', loadStatus);
     els.disconnectBtn.addEventListener('click', disconnect);
+
+    // Change user — clear saved username and return to auth
+    function goToAuth() {
+        localStorage.removeItem('cv_user_id');
+        userId = '';
+        els.userIdInput.value = '';
+        showAuth();
+    }
+    if (els.changeUserBtn) els.changeUserBtn.addEventListener('click', goToAuth);
+    if (els.changeUserBtn2) els.changeUserBtn2.addEventListener('click', goToAuth);
 
     // Auto-poll when pending
     setInterval(function () {

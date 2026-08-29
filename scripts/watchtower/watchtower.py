@@ -1852,7 +1852,7 @@ class HealthServer:
         return web.Response(
             body=content,
             content_type=content_type,
-            headers={"Cache-Control": "public, max-age=300"},
+            headers={"Cache-Control": "no-store"},
         )
 
     # -- Token cleanup task -----------------------------------------------
