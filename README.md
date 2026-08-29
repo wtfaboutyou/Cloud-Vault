@@ -80,7 +80,7 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 | ![Dashboard Nextcloud](docs/assets/screenshots/dashboard.png) | Dashboard Nextcloud setelah login |
 | ![Grafana Dashboard](docs/assets/screenshots/grafana.png) | Monitoring dashboard Grafana |
 
-**Video Demo:** `[Link video demo akan ditambahkan di sini]`
+**Video Demo:** [Demo in youtube](https://youtu.be/seR0e7_DhHE?si=Lz9v-fN7mVC4BGiC)
 
 ---
 
@@ -270,7 +270,6 @@ sudo bash /opt/cloudvault/scripts/demo-features.sh     # Run all 6 feature demos
 | [PERFORMANCE.md](docs/PERFORMANCE.md) | Tuning, compression, benchmarking |
 | [BACKUP.md](docs/BACKUP.md) | Backup/restore strategy & recovery |
 | [MONITORING.md](docs/MONITORING.md) | Prometheus, Grafana, alerting |
-| [DEMO_VIDEO.md](docs/DEMO_VIDEO.md) | Demo video documentation |
 
 ---
 
@@ -352,7 +351,7 @@ sudo systemctl restart cloudvault-watchtower
 journalctl -u cloudvault-watchtower -f
 
 # Settings page
-https://<SERVER_IP>:9191/settings/telegram/
+https://<SERVER_IP>/settings/telegram/
 ```
 
 ---
