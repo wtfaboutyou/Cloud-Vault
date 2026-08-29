@@ -176,7 +176,7 @@ Buka `https://<SERVER_IP>` atau `https://localhost` (di server) dan login dengan
 
 Akses setelah instalasi:
 - **Production:** `https://<SERVER_IP>` (contoh: `https://192.168.1.100`)
-- **Grafana:** `https://<SERVER_IP>/grafana/` (jika monitoring enabled)
+- **Grafana:** `https://<SERVER_IP>/grafana/` (jika monitoring sudah enabled)
 
 > **Catatan:** Browser akan warning "Your connection is not private" karena self-signed certificate. Klik **Advanced → Proceed** untuk lanjut.
 
@@ -185,7 +185,6 @@ Akses setelah instalasi:
 
 ## 5. Link Edusoft Portfolio
 
-> **Placeholder** — Link ke halaman project di Edusoft Portfolio akan ditambahkan manual.
 
 - **Portfolio Page:** [Avrillia Zahra Khoirun Nisa](https://portfolio.edusoftcenter.com/contributors/1908d892-5a79-406a-b529-c2573398da59)
 
