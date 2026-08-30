@@ -486,35 +486,23 @@ phase7_monitoring() {
     return 0
   fi
   apt_quiet install -y prometheus prometheus-node-exporter \
-    prometheus-postgres-exporter prometheus-redis-exporter grafana
+    prometheus-postgres-exporter prometheus-redis-exporter \
+    prometheus-alertmanager grafana
 
   # bind exporters to loopback only
   sed -i -E 's/^.*web.listen-address.*$/ARGS="--web.listen-address=127.0.0.1:9100"/' /etc/default/prometheus-node-exporter 2>/dev/null || true
 
-  cat > /etc/prometheus/prometheus.yml <<EOF
-global:
-  scrape_interval: 15s
+  # Deploy Prometheus config with alert rules + Alertmanager + Watchtower scrape
+  install -m 0644 -o prometheus -g prometheus "${CONFIG_DIR}/prometheus/prometheus.yml" /etc/prometheus/prometheus.yml
+  install -m 0644 -o prometheus -g prometheus "${CONFIG_DIR}/prometheus/alert.rules.yml" /etc/prometheus/alert.rules.yml
+  install -m 0640 -o prometheus -g prometheus "${CONFIG_DIR}/prometheus/alertmanager.yml" /etc/prometheus/alertmanager.yml
 
-scrape_configs:
-  - job_name: node
-    static_configs:
-      - targets: ['127.0.0.1:9100']
-  - job_name: nginx
-    metrics_path: /metrics
-    static_configs:
-      - targets: ['127.0.0.1:9113']
-  - job_name: postgres
-    static_configs:
-      - targets: ['127.0.0.1:9187']
-  - job_name: redis
-    static_configs:
-      - targets: ['127.0.0.1:9121']
-EOF
   systemctl enable --now prometheus prometheus-node-exporter
   systemctl enable --now prometheus-postgres-exporter prometheus-redis-exporter 2>/dev/null || true
+  systemctl enable --now prometheus-alertmanager 2>/dev/null || true
 
   systemctl enable --now grafana-server 2>/dev/null || true
-  log "Monitoring ready (Grafana: http://127.0.0.1:3000 behind Nginx TLS proxy)."
+  log "Monitoring ready (Grafana: https://<SERVER_IP>/grafana/ behind Nginx TLS, alerts via Alertmanager -> Watchtower/Telegram)."
 }
 
 # ---------------------------------------------------------------------------
@@ -558,6 +546,9 @@ WATCHTOWER_HEALTH_HOST=127.0.0.1
 WATCHTOWER_HEALTH_PORT=9191
 WATCHTOWER_REDIS_URL=redis://127.0.0.1:6379/1
 WATCHTOWER_WATCHDOG_INTERVAL=10
+# URL Grafana yang dipublish di balik Nginx TLS (/grafana, bukan :3000).
+# Dipakai Watchtower untuk link "[View Grafana]" di notifikasi alert Telegram.
+WATCHTOWER_GRAFANA_URL=https://<SERVER_IP>/grafana/
 EOF
     chmod 600 "${DEPLOY_DIR}/.secrets/watchtower.env"
     log "Watchtower environment file created: ${DEPLOY_DIR}/.secrets/watchtower.env"

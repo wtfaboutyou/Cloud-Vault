@@ -1,0 +1,35 @@
+# ---------------------------------------------------------------------------
+# CloudVault - Alertmanager configuration
+# Location: /etc/prometheus/alertmanager.yml
+#
+# Alerts from Prometheus rules are dispatched to BOTH:
+#   1) Grafana (via its Alertmanager-compatible notifier endpoint for
+#      Grafana contact points / dashboards notifications)
+#   2) CloudVault Watchtower webhook -> Telegram bot (notifikasi ke semua
+#      user yang terhubung). Watchtower menerima webhook ini dari loopback
+#      tanpa API key (lihat _api_key_middleware di watchtower.py), jadi
+#      tidak perlu header di sini.
+# ---------------------------------------------------------------------------
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'job', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: cloudvault-all
+
+inhibit_rules:
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="warning"]
+    equal: [alertname, job]
+
+receivers:
+  - name: 'cloudvault-all'
+    webhook_configs:
+      - url: 'http://127.0.0.1:3000/api/alertmanager/grafana/v1/notifier'
+        send_resolved: true
+      # CloudVault Watchtower -> Telegram bot (looping only, port 9191)
+      - url: 'http://127.0.0.1:9191/api/alertmanager/webhook'
+        send_resolved: true

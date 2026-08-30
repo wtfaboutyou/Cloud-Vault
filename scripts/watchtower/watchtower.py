@@ -326,6 +326,13 @@ class HealthServer:
         )
         if path in _PUBLIC_ROUTES:
             return await handler(request)
+        # Local webhook endpoints — Alertmanager (receiver) and event webhooks
+        # POST from loopback only. Alertmanager's webhook http_config does not
+        # support custom headers in this version, so skip the API key check for
+        # loopback peers (the endpoints stay protected on non-loopback requests).
+        if path in ("/api/alertmanager/webhook", "/api/events"):
+            if self._is_loopback_request(request):
+                return await handler(request)
         # Internal routes use INTERNAL_API_KEY or fall back to API_KEY
         if path.startswith("/api/internal/"):
             expected = (
@@ -349,6 +356,17 @@ class HealthServer:
                 {"error": "invalid_api_key"}, status=403
             )
         return await handler(request)
+
+    def _is_loopback_request(self, request: web.Request) -> bool:
+        """Return True if the request originated from a loopback interface."""
+        transport = request.transport
+        if transport is None:
+            return False
+        peername = transport.get_extra_info("peername")
+        if peername is None:
+            return False
+        host = peername[0]
+        return host in ("127.0.0.1", "::1")
 
     # -- Lazy DB init -----------------------------------------------------
 
