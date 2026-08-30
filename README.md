@@ -293,12 +293,37 @@ Watchtower adalah layer integrasi operasional yang menghubungkan Telegram dengan
 |-------|-----------|
 | **Telegram Bot Commands** | `/status`, `/health`, `/metrics`, `/storage`, `/jobs`, `/alerts` — semua read-only, authorization-based |
 | **Account Linking** | Token kriptografis SHA-256, single-use, 10-minute expiry. Password tidak pernah dikirim ke Telegram |
-| **Event Notifications** | Backup completed/failed, health alerts, security alerts, storage warnings — route ke semua user yang terhubung |
+| **Event Notifications** | Backup, upload, storage warning/critical, background job failures, dan alert kesehatan/keamanan — route ke semua user yang terhubung |
 | **Alertmanager Webhook** | Menerima alert dari Prometheus Alertmanager, format untuk Telegram, deduplication 5 menit |
 | **Notification Queue** | Redis-backed queue dengan exponential backoff retry, graceful degradation saat Redis unavailable |
 | **Prometheus Metrics** | Watchtower expose metrik internal: notification count, queue depth, uptime, command requests |
 | **Settings Page** | Web UI untuk connect/disconnect Telegram, manage notification preferences per event type |
-| **9 Notification Types** | Backup, Health, Security, Upload, Storage Warning/Critical, Background Job failures |
+| **9 Notification Types** | Upload completed/failed, Backup completed/failed, Health/Security alert, Storage Warning/Critical, Background Job failures |
+
+### Sumber Event Notifikasi
+
+| Event Type | Producer | Kapan terkirim |
+|------------|----------|----------------|
+| `BACKUP_COMPLETED` / `BACKUP_FAILED` | `backup.sh` | Backup harian/mingguan/bulanan selesai atau gagal |
+| `UPLOAD_COMPLETED` / `UPLOAD_FAILED` | Nextcloud app `upload_notifier` | File berhasil di-upload/update, atau upload mulai tapi tidak selesai (mis. dibatalkan, koneksi putus, atau diblokir antivirus) |
+| `STORAGE_WARNING` / `STORAGE_CRITICAL` | `healthcheck.sh` (via `healthcheck-prom.sh`, timer 5 menit) | Pemakaian disk ≥ 75% (warning) / ≥ 85% (critical); hanya dikirim saat state berubah |
+| `BACKGROUND_JOB_FAILED` | `maintenance.sh`, `restore.sh` | Perintah occ maintenance gagal, atau restore gagal |
+| `SECURITY_ALERT` / `HEALTH_ALERT` | Prometheus Alertmanager (webhook) | Rule alert fire (mis. service mati, SSL hampir kadaluarsa) |
+
+App `upload_notifier` (untuk deteksi upload) ikut ter-deploy otomatis saat instalasi. Ada dua mekanisme `UPLOAD_FAILED`:
+
+1. **Upload tidak pernah selesai** — pending upload yang mulai (hook `BeforeNode*`) tapi tidak ada event selesai, ditandai gagal setelah TTL (default 600 detik).
+2. **Upload diblokir antivirus** — diterima langsung oleh `files_antivirus` sebelum file final terbentuk (tidak ada event file sama sekali), jadi dideteksi lewat catatan Activity `files_antivirus`/`virus_detected` di `oc_activity`; cursor `av_last_activity_id` memastikan tiap penolakan hanya dilaporkan sekali.
+
+Konfigurasi opsional (via occ):
+
+```bash
+occ config:app:set upload_notifier watchtower_url --value="http://127.0.0.1:9191/api/events"
+occ config:app:set upload_notifier failure_ttl --value="600"        # detik
+occ config:app:set upload_notifier event_UPLOAD_FAILED --value="1"  # aktifkan event ini
+occ config:app:set upload_notifier event_UPLOAD_COMPLETED --value="1"
+occ config:app:set upload_notifier av_last_activity_id --value="0"  # reset cursor penolakan antivirus
+```
 
 ### Arsitektur
 
@@ -320,7 +345,9 @@ Telegram Bot API ◄── webhook/polling ──► CloudVault Watchtower
                                               │       └──► Exponential backoff retry
                                               │
                                               └──► Event Webhook (port 9191)
-                                                      └──► backup.sh, maintenance.sh
+                                                      ├──► backup.sh, restore.sh
+                                                      ├──► maintenance.sh, healthcheck.sh
+                                                      └──► Nextcloud app upload_notifier (uploads)
 ```
 
 ### Perintah Bot

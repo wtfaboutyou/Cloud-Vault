@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>upload_notifier</id>
+    <name>CloudVault Upload Notifier</name>
+    <summary>Report file uploads and storage events to CloudVault Watchtower</summary>
+    <description><![CDATA[CloudVault Upload Notifier listens to Nextcloud filesystem events and reports upload success/failure to the CloudVault Watchtower service, which routes them to connected Telegram users.
+
+Events emitted:
+  * UPLOAD_COMPLETED - a file was successfully uploaded/created
+  * UPLOAD_FAILED    - an upload failed: started-but-never-completed (tracked via pending writes) or rejected by files_antivirus (tracked via oc_activity)
+
+Configuration (occ config:app:set upload_notifier ...):
+  * watchtower_url        - Watchtower event endpoint (default http://127.0.0.1:9191/api/events)
+  * failure_ttl           - seconds before a pending upload is considered failed (default 600)
+  * av_last_activity_id   - high-water mark of processed antivirus rejection activities (do not touch normally)
+  * event_UPLOAD_COMPLETED / event_UPLOAD_FAILED - per-event toggle (yes/no)
+]]></description>
+    <version>1.0.0</version>
+    <licence>agpl</licence>
+    <author mail="admin@cloudvault.local">CloudVault</author>
+    <namespace>UploadNotifier</namespace>
+    <category>monitoring</category>
+    <website>https://example.com/cloudvault</website>
+    <repository type="git">https://example.com/cloudvault</repository>
+    <screenshot small-thumbnail=""></screenshot>
+    <dependencies>
+        <php min-version="8.0" max-version="8.5" />
+        <nextcloud min-version="25" max-version="99" />
+    </dependencies>
+    <background-jobs>
+        <job>OCA\UploadNotifier\BackgroundJob\CheckPendingUploadsJob</job>
+    </background-jobs>
+</info>

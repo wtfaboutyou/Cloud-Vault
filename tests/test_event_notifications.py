@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import time
+import asyncio
 import unittest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -33,10 +34,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "wat
 
 from watchtower import (
     HealthServer,
+    WatchtowerService,
     Config,
     _EVENT_DEDUP_WINDOW_SECONDS,
     _recent_events,
 )
+
+
+def run_async(coro):
+    """Run an async coroutine in a new event loop."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 # ======================================================================
@@ -844,15 +855,18 @@ class TestCloudVaultIndependence(unittest.TestCase):
 
     def test_backup_script_notification_does_not_block(self):
         """Backup notification should be fire-and-forget."""
-        # The notify_watchtower function in backup.sh uses:
+        # The notify_watchtower() helper uses:
         # timeout 5 curl -s -o /dev/null ... || true
         # The || true ensures the backup always continues
         # This is a structural test - verify the function exists
-        backup_script = Path(__file__).resolve().parent.parent / "scripts" / "backup.sh"
+        scripts = Path(__file__).resolve().parent.parent / "scripts"
+        backup_script = scripts / "backup.sh"
+        notify_helper = scripts / "lib" / "notify.sh"
         content = backup_script.read_text()
+        helper = notify_helper.read_text()
         self.assertIn("notify_watchtower", content)
-        self.assertIn("|| true", content)
-        self.assertIn("timeout 5", content)
+        self.assertIn("|| true", helper)
+        self.assertIn("timeout 5", helper)
 
     def test_backup_script_preserves_exit_code(self):
         """Backup script should preserve original exit code."""
@@ -863,10 +877,16 @@ class TestCloudVaultIndependence(unittest.TestCase):
 
     def test_backup_script_watchtower_optional(self):
         """Backup should work without Watchtower configured."""
-        backup_script = Path(__file__).resolve().parent.parent / "scripts" / "backup.sh"
+        scripts = Path(__file__).resolve().parent.parent / "scripts"
+        backup_script = scripts / "backup.sh"
+        notify_helper = scripts / "lib" / "notify.sh"
         content = backup_script.read_text()
+        helper = notify_helper.read_text()
         # Should check for API key before notifying
-        self.assertIn('[[ -z "${WATCHTOWER_API_KEY}" ]] && return 0', content)
+        self.assertIn("WATCHTOWER_API_KEY", helper)
+        self.assertIn("return 0", helper)
+        # The helper must degrade silently when the env file is missing
+        self.assertIn("2>/dev/null", helper)
 
     def test_watchtower_endpoint_returns_immediately(self):
         """Event endpoint should return 200 immediately."""
@@ -1007,6 +1027,97 @@ class TestEdgeCases(unittest.TestCase):
         }
         message = server._format_event_telegram(event)
         self.assertNotIn("Exit code", message)
+
+
+# ======================================================================
+# 14. Queue send callback preference filtering
+# ======================================================================
+
+class TestQueueSendCallback(unittest.TestCase):
+    """Test that the Redis queue send path respects per-event preferences.
+
+    Regression test: the queue path previously checked a non-existent
+    "backup_notifications" key, silently bypassing every notification toggle.
+    """
+
+    def _make_service(self):
+        config = Config()
+        logger = MagicMock()
+        return WatchtowerService(config)
+
+    def _send(self, svc, connections, prefs, event_type):
+        fake_db = MagicMock()
+        fake_db.get_all_connections = lambda: connections
+        fake_db.get_notification_prefs = lambda user_id: prefs
+        svc.health_server._get_tg_db = MagicMock(return_value=fake_db)
+
+        sent = []
+
+        class FakeResp:
+            status = 200
+
+            async def text(self):
+                return "{}"
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            # aiohttp ClientSession.post() returns an async context manager
+            # (not a coroutine); mirror that shape.
+            def post(self, url, json=None, timeout=None):
+                sent.append(json)
+                return FakeResp()
+
+        payload = {"event_type": event_type, "message": "notification message"}
+        with patch.dict(os.environ, {"WATCHTELEGRAM_BOT_TOKEN": "123:abc"}, clear=False):
+            with patch("aiohttp.ClientSession", FakeSession):
+                result = run_async(svc._queue_send_callback(payload))
+        return sent, result
+
+    def test_disabled_event_pref_skips_user(self):
+        """BACKUP_COMPLETED disabled -> no Telegram send happens."""
+        svc = self._make_service()
+        conn = {"user_id": "alice", "telegram_user_id": 111}
+        prefs = {"BACKUP_COMPLETED": "false"}
+        sent, result = self._send(svc, [conn], prefs, "BACKUP_COMPLETED")
+        self.assertEqual(sent, [])
+        self.assertFalse(result["success"])
+
+    def test_enabled_event_pref_sends(self):
+        """Enabled event pref -> notification is sent."""
+        svc = self._make_service()
+        conn = {"user_id": "alice", "telegram_user_id": 111}
+        prefs = {"BACKUP_COMPLETED": "true"}
+        sent, result = self._send(svc, [conn], prefs, "BACKUP_COMPLETED")
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["chat_id"], 111)
+        self.assertTrue(result["success"])
+
+    def test_upload_event_pref_respected(self):
+        """UPLOAD_FAILED disabled -> skip; enabled -> send."""
+        svc = self._make_service()
+        conn = {"user_id": "bob", "telegram_user_id": 222}
+        sent, _ = self._send(svc, [conn], {"UPLOAD_FAILED": "false"}, "UPLOAD_FAILED")
+        self.assertEqual(sent, [])
+        sent, _ = self._send(svc, [conn], {"UPLOAD_FAILED": "true"}, "UPLOAD_FAILED")
+        self.assertEqual(len(sent), 1)
+
+    def test_default_pref_true_when_unknown(self):
+        """Unknown pref defaults to enabled (send)."""
+        svc = self._make_service()
+        conn = {"user_id": "carol", "telegram_user_id": 333}
+        sent, _ = self._send(svc, [conn], {}, "STORAGE_CRITICAL")
+        self.assertEqual(len(sent), 1)
 
 
 if __name__ == "__main__":

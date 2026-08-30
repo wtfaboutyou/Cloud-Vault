@@ -37,52 +37,13 @@ LOG_DIR="/var/log/cloudvault"
 LOG="${LOG_DIR}/backup.log"
 mkdir -p "${LOG_DIR}"
 
-# Phase 7 — Event notification configuration
-WATCHTOWER_URL="${WATCHTOWER_URL:-http://127.0.0.1:9191}"
-WATCHTOWER_API_KEY="${WATCHTOWER_API_KEY:-}"
+# Phase 7 — Event notification configuration (shared helper)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/notify.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/notify.sh" 2>/dev/null || true
 
 log() { echo "[$(date '+%F %T')] $*" | tee -a "${LOG}"; }
-
-# Phase 7 — Fire-and-forget event notification to Watchtower.
-# Notifications MUST never block or fail the backup operation.
-notify_watchtower() {
-  local event_type="$1" status="$2" detail="$3"
-  shift 3
-  # Optional named parameters: label, size, duration, exit_code
-  local label="" size="" duration="" exit_code=""
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      label=*)      label="${1#label=}";;
-      size=*)       size="${1#size=}";;
-      duration=*)   duration="${1#duration=}";;
-      exit_code=*)  exit_code="${1#exit_code=}";;
-    esac
-    shift
-  done
-
-  [[ -z "${WATCHTOWER_API_KEY}" ]] && return 0
-
-  local timestamp
-  timestamp="$(date '+%F %T %Z')"
-
-  # Build JSON payload using printf (safe, no jq dependency)
-  local payload
-  payload=$(printf '{"event_type":"%s","status":"%s","detail":"%s","timestamp":"%s"' \
-    "${event_type}" "${status}" "${detail}" "${timestamp}")
-  [[ -n "${label}" ]] && payload="${payload},\"label\":\"${label}\""
-  [[ -n "${size}" ]] && payload="${payload},\"size\":\"${size}\""
-  [[ -n "${duration}" ]] && payload="${payload},\"duration\":\"${duration}\""
-  [[ -n "${exit_code}" ]] && payload="${payload},\"exit_code\":${exit_code}"
-  payload="${payload}}"
-
-  # Fire-and-forget: use timeout + no output check
-  # curl failure is logged but never causes backup to fail
-  timeout 5 curl -s -o /dev/null \
-    -X POST "${WATCHTOWER_URL}/api/events" \
-    -H "Content-Type: application/json" \
-    -H "X-API-Key: ${WATCHTOWER_API_KEY}" \
-    -d "${payload}" >> "${LOG}" 2>&1 || true
-}
 
 require_root() { [[ ${EUID} -eq 0 ]] || { echo "Please run as root." >&2; exit 1; }; }
 

@@ -421,6 +421,7 @@ Description=CloudVault daily Nextcloud maintenance
 
 [Service]
 Type=oneshot
+EnvironmentFile=-/opt/cloudvault/.secrets/watchtower.env
 ExecStart=${DEPLOY_DIR}/scripts/maintenance.sh
 SVC
   cat > /etc/systemd/system/cloudvault-maintenance.timer <<T
@@ -456,8 +457,29 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 T
+  cat > /etc/systemd/system/cloudvault-healthcheck.service <<SVC
+[Unit]
+Description=CloudVault periodic health check
+After=cloudvault-watchtower.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/opt/cloudvault/.secrets/watchtower.env
+ExecStart=${DEPLOY_DIR}/scripts/healthcheck-prom.sh
+SVC
+  cat > /etc/systemd/system/cloudvault-healthcheck.timer <<T
+[Unit]
+Description=CloudVault health check timer
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+T
   systemctl daemon-reload
-  systemctl enable --now cloudvault-maintenance.timer cloudvault-backup.timer
+  systemctl enable --now cloudvault-maintenance.timer cloudvault-backup.timer cloudvault-healthcheck.timer
   log "Phase 6 complete."
 }
 
@@ -632,6 +654,22 @@ phase10_telegram() {
   mkdir -p "${settings_dst}"
   cp -r "${settings_src}/." "${settings_dst}/"
   chown -R watchtower:watchtower "${settings_dst}"
+
+  # Deploy CloudVault Upload Notifier Nextcloud app
+  log "Deploying upload_notifier Nextcloud app"
+  local APP_SRC="${SCRIPT_DIR}/../apps/upload_notifier"
+  local NCAPPS="${NC_BASE}/apps"
+  mkdir -p "${NCAPPS}"
+  if [[ -d "${APP_SRC}" ]]; then
+    cp -r "${APP_SRC}" "${NCAPPS}/upload_notifier"
+    chown -R www-data:www-data "${NCAPPS}/upload_notifier"
+    occ app:enable upload_notifier 2>/dev/null || warn "upload_notifier app could not be enabled"
+    occ config:app:set upload_notifier watchtower_url \
+      --value="${WATCHTOWER_URL:-http://127.0.0.1:9191}/api/events" 2>/dev/null || true
+    log "upload_notifier app enabled"
+  else
+    warn "upload_notifier app source not found: ${APP_SRC}"
+  fi
 
   # Create Telegram environment configuration if not exists
   if [[ ! -f "${DEPLOY_DIR}/.secrets/telegram.env" ]]; then

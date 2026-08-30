@@ -29,8 +29,22 @@ LOG_DIR="/var/log/cloudvault"
 LOG="${LOG_DIR}/restore.log"
 mkdir -p "${LOG_DIR}"
 
+# Phase 7 — Event notification (shared helper)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/notify.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/notify.sh" 2>/dev/null || true
+
 log() { echo "[$(date '+%F %T')] $*" | tee -a "${LOG}"; }
-fail() { echo "[$(date '+%F %T')] ERROR: $*" | tee -a "${LOG}"; exit 1; }
+
+# Report restore failure to Watchtower (fire-and-forget) before exiting
+fail() {
+  local msg="$*"
+  echo "[$(date '+%F %T')] ERROR: ${msg}" | tee -a "${LOG}"
+  notify_watchtower "BACKGROUND_JOB_FAILED" "error" "Restore failed: ${msg}" \
+    "exit_code=1"
+  exit 1
+}
 
 require_root() { [[ ${EUID} -eq 0 ]] || fail "Please run as root."; }
 

@@ -28,6 +28,32 @@ LOG_DIR="/var/log/cloudvault"
 JSON=0
 PROBLEMS=0
 
+# Phase 7 — Event notification (shared helper)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/notify.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/notify.sh" 2>/dev/null || true
+
+# State directory to remember the last emitted notification per metric
+# (avoids spamming Telegram when the health check runs repeatedly)
+STATE_DIR="/var/lib/cloudvault"
+mkdir -p "${STATE_DIR}" 2>/dev/null || true
+
+# emit_event_on_change <event_type> <state_key> <status> <detail>
+# Sends a Watchtower event only when the metric state actually changed.
+emit_event_on_change() {
+  local event_type="$1" key="$2" status="$3" detail="${4:-}"
+  local state_file="${STATE_DIR}/notify_${key}.state"
+  local prev=""
+  [[ -f "${state_file}" ]] && prev="$(cat "${state_file}" 2>/dev/null)"
+  if [[ "${prev}" != "${status}" ]]; then
+    if [[ "${status}" != "ok" ]]; then
+      notify_watchtower "${event_type}" "${status}" "${detail}"
+    fi
+    echo "${status}" > "${state_file}" 2>/dev/null || true
+  fi
+}
+
 [[ $# -gt 0 && "$1" == "--json" ]] && JSON=1
 
 service_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
@@ -78,10 +104,13 @@ disk_usage=$(df -P "${NC_DATA_DIR}" | awk 'NR==2 {print $5+0}')
 disk_mount=$(df -P "${NC_DATA_DIR}" | awk 'NR==2 {print $6}')
 if (( disk_usage >= DISK_THRESH_CRIT )); then
   report disk crit "${disk_usage}% on ${disk_mount}"
+  emit_event_on_change "STORAGE_CRITICAL" "storage" "error" "Disk usage ${disk_usage}% on ${disk_mount}"
 elif (( disk_usage >= DISK_THRESH_WARN )); then
   report disk warn "${disk_usage}% on ${disk_mount}"
+  emit_event_on_change "STORAGE_WARNING" "storage" "warning" "Disk usage ${disk_usage}% on ${disk_mount}"
 else
   report disk ok "${disk_usage}% on ${disk_mount}"
+  emit_event_on_change "STORAGE_WARNING" "storage" "ok" ""
 fi
 
 # ---- memory ----

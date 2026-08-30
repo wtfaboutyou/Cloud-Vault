@@ -2130,12 +2130,13 @@ class WatchtowerService:
                 if not telegram_id:
                     continue
 
-                # Check notification preferences
+                # Check notification preferences for the event type
+                # (e.g. UPLOAD_COMPLETED, BACKUP_FAILED, STORAGE_CRITICAL, ...)
                 prefs = await asyncio.get_event_loop().run_in_executor(
                     None, db.get_notification_prefs, user_id
                 )
-                if prefs and not prefs.get("backup_notifications", True):
-                    # User has disabled notifications
+                if prefs and prefs.get(event_type, "true") != "true":
+                    # User has disabled notifications for this event type
                     continue
 
                 # Send message via Telegram bot
