@@ -2,12 +2,23 @@
 #
 # install.sh - CloudVault deployment orchestrator
 #
-# Target : Debian 13 (Trixie), native install (NO Docker / containers).
-# Usage  : sudo bash install.sh [stage]
+# Usage: sudo bash install.sh            # interactive wizard -> full deploy
+#        sudo bash install.sh [stage]    # run a single stage directly
 #
-#   all          Phase 1-9 full deployment
+# Wizard (interactive, ~5 questions, then fully automated):
+#   1. domain
+#   2. email admin
+#   3. password admin
+#   4. Telegram bot token
+#   5. Telegram chat id        (last input; used for the final test message)
+#
+# Then, with no further input, it runs the whole deployment automatically and
+# finishes by sending a "CloudVault connected" test message to Telegram.
+#
+# Stages (for power users / resume):
+#   all          Phase 1-10 full deployment
 #   prep         Phase 1 : timezone, NTP, swap, base packages
-#   packages     Phase 2 : PHP 8.4, Nginx, PostgreSQL, Redis, Fail2ban, ClamAV
+#   packages     Phase 2 : PHP, Nginx, PostgreSQL, Redis, Fail2ban, ClamAV
 #   database     Phase 3a: PostgreSQL tuning + role, Redis hardening
 #   nextcloud    Phase 3b: Nextcloud code, config.php, occ install
 #   web          Phase 4 : Nginx site, Brotli, PHP tuning, TLS (certbot)
@@ -16,6 +27,8 @@
 #   monitoring   Phase 7 : Prometheus, exporters, Grafana (ENABLE_MONITORING=yes)
 #   backup       Phase 8 : backup dir + AES-256 encryption key
 #   watchtower   Phase 9 : Watchtower foundation service (ENABLE_WATCHTOWER=yes)
+#   telegram     Phase 10: Telegram bot foundation (ENABLE_TELEGRAM=yes)
+#   update       Phase U : idempotent update/maintenance (safe re-run, no data touch)
 #
 set -uo pipefail
 
@@ -28,7 +41,7 @@ DEPLOY_DIR="/opt/cloudvault"
 # ---------------------------------------------------------------------------
 NC_DOMAIN="${NC_DOMAIN:-localhost}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@localhost}"
-NC_PHP_VER="${NC_PHP_VER:-8.4}"
+NC_PHP_VER="${NC_PHP_VER:-}"   # empty -> detected from OS; see detect_os()
 NC_BASE="${NC_BASE:-/var/www/nextcloud}"
 NC_DATA_DIR="${NC_DATA_DIR:-${NC_BASE}/data}"
 NC_DB_NAME="${NC_DB_NAME:-nextcloud}"
@@ -61,6 +74,109 @@ fail() { echo -e "[$(date '+%F %T')] ${RED}${1}${NC}" >&2; exit 1; }
 
 require_root() { [[ ${EUID} -eq 0 ]] || fail "Please run as root."; }
 
+# ---------------------------------------------------------------------------
+# OS detection (Debian / Ubuntu) -> picks the right native PHP version.
+# ---------------------------------------------------------------------------
+detect_os() {
+  if [[ ! -f /etc/os-release ]]; then
+    fail "Unsupported OS: /etc/os-release not found (Debian/Ubuntu required)."
+  fi
+  source /etc/os-release
+  case "${ID:-}" in
+    debian)
+      OS_FAMILY="debian"
+      case "${VERSION_CODENAME:-}" in
+        trixie)   NC_PHP_VER="${NC_PHP_VER:-8.4}" ;;
+        bookworm) NC_PHP_VER="${NC_PHP_VER:-8.2}" ;;
+        *)        fail "Unsupported Debian release: ${VERSION_CODENAME:-?}. Install on Debian 12/13." ;;
+      esac
+      ;;
+    ubuntu)
+      OS_FAMILY="ubuntu"
+      case "${VERSION_CODENAME:-}" in
+        noble)  NC_PHP_VER="${NC_PHP_VER:-8.3}" ;;
+        jammy)  NC_PHP_VER="${NC_PHP_VER:-8.1}" ;;
+        *)      fail "Unsupported Ubuntu release: ${VERSION_CODENAME:-?}. Install on Ubuntu 22.04/24.04." ;;
+      esac
+      ;;
+    *)
+      fail "Unsupported OS: ${PRETTY_NAME:-${ID:-?}} (Debian/Ubuntu required)."
+      ;;
+  esac
+  log "Detected OS: ${PRETTY_NAME:-${ID} ${VERSION_CODENAME}} -> PHP ${NC_PHP_VER}"
+}
+
+# ---------------------------------------------------------------------------
+# Interactive wizard. Runs first (with no further client input after it) when
+# `./install.sh` is invoked without a stage argument. Sets the environment
+# variables the rest of the script consumes.
+# ---------------------------------------------------------------------------
+run_wizard() {
+  require_root
+  detect_os
+
+  echo
+  echo "=== CloudVault interactive setup wizard ==="
+  echo "Running on $(. /etc/os-release; echo "$PRETTY_NAME") (PHP ${NC_PHP_VER})"
+  echo "-------------------------------------------"
+
+  printf 'Domain (FQDN or server IP) [%s]: ' "${NC_DOMAIN}"
+  read -r NC_DOMAIN_IN
+  NC_DOMAIN="${NC_DOMAIN_IN:-${NC_DOMAIN}}"
+
+  printf 'Admin email [%s]: ' "${ADMIN_EMAIL}"
+  read -r ADMIN_EMAIL_IN
+  ADMIN_EMAIL="${ADMIN_EMAIL_IN:-${ADMIN_EMAIL}}"
+
+  printf 'Admin password [leave blank to auto-generate]: '
+  read -r -s NC_ADMIN_PASS_IN
+  echo
+  if [[ -n "${NC_ADMIN_PASS_IN}" ]]; then
+    NC_ADMIN_PASS="${NC_ADMIN_PASS_IN}"
+  fi
+
+  printf 'Telegram bot token (from @BotFather): '
+  read -r TG_BOT_TOKEN
+  printf 'Telegram chat id (e.g. -1001234567890): '
+  read -r TG_CHAT_ID
+
+  # Non-empty token/chat id enables the Telegram foundation + final test ping.
+  if [[ -n "${TG_BOT_TOKEN}" && -n "${TG_CHAT_ID}" ]]; then
+    ENABLE_TELEGRAM="yes"
+    ENABLE_WATCHTOWER="yes"
+    WATCHTELEGRAM_BOT_TOKEN="${TG_BOT_TOKEN}"
+    WATCHTELEGRAM_ADMIN_USER_ID="${TG_CHAT_ID}"
+  fi
+
+  echo
+  log "Wizard complete. Starting automated deployment (no further input needed)."
+}
+
+# Send a final "CloudVault connected" Telegram test message (idempotent).
+telegram_final_ping() {
+  [[ "${ENABLE_TELEGRAM}" == "yes" ]] || return 0
+  local token="${TG_BOT_TOKEN:-${WATCHTELEGRAM_BOT_TOKEN:-}}"
+  local chat="${TG_CHAT_ID:-${WATCHTELEGRAM_ADMIN_USER_ID:-}}"
+  [[ -n "${token}" && -n "${chat}" ]] || return 0
+  local msg="🚀 *CloudVault connected\\!*
+Install selesai untuk *${NC_DOMAIN}*
+Login: https://${NC_DOMAIN}
+Admin: ${NC_ADMIN_USER}"
+  local resp
+  resp="$(curl -s -w '\n%{http_code}' \
+    "https://api.telegram.org/bot${token}/sendMessage" \
+    --data-urlencode "chat_id=${chat}" \
+    --data-urlencode "text=${msg}" \
+    --data-urlencode "parse_mode=MarkdownV2")"
+  local http_code
+  http_code="$(printf '%s' "${resp}" | tail -1)"
+  if [[ "${http_code}" == "200" ]]; then
+    log "Test message sent to Telegram: CloudVault connected."
+  else
+    warn "Could not send Telegram test message (HTTP ${http_code}). Check bot token / chat id."
+  fi
+}
+
 deploy_scripts() {
   # First run: mirror the scripts/ directory into /opt/cloudvault/scripts
   if [[ ! -f "${DEPLOY_DIR}/scripts/install.sh" ]]; then
@@ -70,6 +186,48 @@ deploy_scripts() {
   fi
   if [[ ! -f "${DEPLOY_DIR}/config/nginx/sites-available/cloudvault.conf" && -d "${CONFIG_DIR}" ]]; then
     cp -r "${CONFIG_DIR}" "${DEPLOY_DIR}/config"
+  fi
+}
+
+# Load a shell-style env file into the current shell WITHOUT `source`-ing it:
+# the persisted files contain unquoted `VAR=value with spaces` (libpq-style
+# DSNs) that `source` would misparse, so values are taken literally after the
+# first `=` and quotes stripped. Keys already exported by the caller win.
+load_env_file() {
+  local f="$1" k v exported_keys
+  [[ -f "${f}" ]] || return 0
+  exported_keys="$(compgen -e | tr '\n' ' ')"
+  while IFS= read -r line; do
+    [[ "${line}" =~ ^[[:space:]]*# ]] && continue
+    [[ -n "${line}" && "${line}" == *=* ]] || continue
+    k="${line%%=*}"
+    [[ "${k}" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || continue
+    [[ " ${exported_keys} " == *" ${k} "* ]] && continue
+    v="${line#*=}"
+    [[ "${v}" =~ ^\"(.*)\"$ ]] && v="${BASH_REMATCH[1]}"
+    printf -v "${k}" '%s' "${v}"
+  done < "${f}"
+  log "Loaded persisted secrets from ${f}"
+}
+
+# Resume / update aware: reuse the credentials persisted by an earlier run so
+# that a stage-resume (`install.sh <stage>`) or `install.sh update` applies the
+# same domain, DB/Redis passwords etc. as the original install instead of the
+# script defaults. On a first run the files don't exist yet and this is a no-op.
+load_secrets() {
+  local f
+  for f in \
+    "${DEPLOY_DIR}/.secrets/cloudvault.env" \
+    "${DEPLOY_DIR}/.secrets/telegram.env" \
+    "${DEPLOY_DIR}/.secrets/watchtower.env"
+  do
+    load_env_file "${f}"
+  done
+
+  # Re-enable optional phases when their credentials are present on a resume.
+  if [[ -n "${WATCHTELEGRAM_BOT_TOKEN:-}" && -n "${WATCHTELEGRAM_ADMIN_USER_ID:-}" ]]; then
+    ENABLE_TELEGRAM="yes"
+    ENABLE_WATCHTOWER="yes"
   fi
 }
 
@@ -302,10 +460,12 @@ EOF
   ( crontab -l 2>/dev/null | grep -v 'nextcloud/cron.php'; \
     echo "*/5 * * * * php -f ${NC_BASE}/cron.php" ) | crontab -
 
-  # preserve generated credentials for later phases
+  # preserve generated credentials for later phases + resume/update
   mkdir -p "${DEPLOY_DIR}/.secrets"
   umask 077
   {
+    echo "NC_DOMAIN=${NC_DOMAIN}"
+    echo "ADMIN_EMAIL=${ADMIN_EMAIL}"
     echo "NC_ADMIN_USER=${NC_ADMIN_USER}"
     echo "NC_ADMIN_PASS=${NC_ADMIN_PASS}"
     echo "NC_DB_PASS=${NC_DB_PASS}"
@@ -514,6 +674,15 @@ phase7_monitoring() {
   # bind exporters to loopback only
   sed -i -E 's/^.*web.listen-address.*$/ARGS="--web.listen-address=127.0.0.1:9100"/' /etc/default/prometheus-node-exporter 2>/dev/null || true
 
+  # enable node-exporter textfile collector for the security (fail2ban) metrics
+  if ! grep -q 'textfile.directory' /etc/default/prometheus-node-exporter 2>/dev/null; then
+    sed -i -E 's/^ARGS=.*/ARGS="--web.listen-address=127.0.0.1:9100 --collector.textfile.directory=\/var\/lib\/node_exporter\/textfile_collector"/' \
+      /etc/default/prometheus-node-exporter 2>/dev/null || true
+  fi
+  install -d -m 0755 /var/lib/node_exporter/textfile_collector
+  install -m 0755 "${SCRIPT_DIR}/fail2ban-collector.sh" /opt/cloudvault/scripts/fail2ban-collector.sh
+  chown -R root:root /var/lib/node_exporter/textfile_collector
+
   # Deploy Prometheus config with alert rules + Alertmanager + Watchtower scrape
   install -m 0644 -o prometheus -g prometheus "${CONFIG_DIR}/prometheus/prometheus.yml" /etc/prometheus/prometheus.yml
   install -m 0644 -o prometheus -g prometheus "${CONFIG_DIR}/prometheus/alert.rules.yml" /etc/prometheus/alert.rules.yml
@@ -522,6 +691,35 @@ phase7_monitoring() {
   systemctl enable --now prometheus prometheus-node-exporter
   systemctl enable --now prometheus-postgres-exporter prometheus-redis-exporter 2>/dev/null || true
   systemctl enable --now prometheus-alertmanager 2>/dev/null || true
+
+  # Security metrics collector (fail2ban) timer
+  cat > /etc/systemd/system/cloudvault-fail2ban.service <<SVCC
+[Unit]
+Description=CloudVault fail2ban security metrics collector
+
+[Service]
+Type=oneshot
+ExecStart=/opt/cloudvault/scripts/fail2ban-collector.sh
+SVCC
+  cat > /etc/systemd/system/cloudvault-fail2ban.timer <<TIM
+[Unit]
+Description=CloudVault fail2ban metrics collection timer
+
+[Timer]
+OnCalendar=*:0/1
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIM
+  systemctl daemon-reload
+  systemctl enable --now cloudvault-fail2ban.timer 2>/dev/null || true
+
+  # Deploy Grafana security dashboard template (import manually in Grafana,
+  # consistent with the Watchtower dashboard).
+  install -d -m 0755 /opt/cloudvault/config/grafana/dashboards
+  install -m 0644 "${CONFIG_DIR}/grafana/dashboards/security.json" \
+    /opt/cloudvault/config/grafana/dashboards/security.json 2>/dev/null || true
 
   systemctl enable --now grafana-server 2>/dev/null || true
   log "Monitoring ready (Grafana: https://<SERVER_IP>/grafana/ behind Nginx TLS, alerts via Alertmanager -> Watchtower/Telegram)."
@@ -683,14 +881,14 @@ phase10_telegram() {
 # CloudVault Telegram Bot Configuration
 # Generated during deployment - do not edit manually
 
-# Bot token - obtain from @BotFather in Telegram
-WATCHTELEGRAM_BOT_TOKEN=""
+# Bot token - from @BotFather (set by wizard if provided)
+WATCHTELEGRAM_BOT_TOKEN="${WATCHTELEGRAM_BOT_TOKEN}"
 
 # Webhook URL - must use HTTPS with domain validated by Let's Encrypt
 WATCHTELEGRAM_WEBHOOK_URL=""
 
-# Telegram user ID of admin who can receive notifications
-WATCHTELEGRAM_ADMIN_USER_ID=""
+# Telegram user ID of admin who can receive notifications (set by wizard)
+WATCHTELEGRAM_ADMIN_USER_ID="${WATCHTELEGRAM_ADMIN_USER_ID}"
 
 # Bot username for deep links (without @)
 WATCHTELEGRAM_BOT_USERNAME="cloudvaultfbot"
@@ -711,6 +909,19 @@ WATCHTOWER_SETTINGS_DIR=${settings_dst}
 EOF
     chmod 600 "${DEPLOY_DIR}/.secrets/telegram.env"
     log "Telegram environment configuration created: ${DEPLOY_DIR}/.secrets/telegram.env"
+  else
+    # File exists: keep it idempotent, but refresh token/chat id if the wizard
+    # supplied new values on a re-run.
+    if [[ -n "${WATCHTELEGRAM_BOT_TOKEN}" ]]; then
+      sed -i "s|^WATCHTELEGRAM_BOT_TOKEN=.*|WATCHTELEGRAM_BOT_TOKEN=\"${WATCHTELEGRAM_BOT_TOKEN}\"|" \
+        "${DEPLOY_DIR}/.secrets/telegram.env"
+      log "Telegram bot token updated from wizard input."
+    fi
+    if [[ -n "${WATCHTELEGRAM_ADMIN_USER_ID}" ]]; then
+      sed -i "s|^WATCHTELEGRAM_ADMIN_USER_ID=.*|WATCHTELEGRAM_ADMIN_USER_ID=\"${WATCHTELEGRAM_ADMIN_USER_ID}\"|" \
+        "${DEPLOY_DIR}/.secrets/telegram.env"
+      log "Telegram chat id updated from wizard input."
+    fi
   fi
 
   # Also update watchtower.env with linking config
@@ -787,24 +998,130 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Phase U - idempotent update / maintenance (safe to re-run, never touches data)
+# ---------------------------------------------------------------------------
+# Unlike the install phases (which are run once), this deliberately avoids
+# rewriting config.php / regenerating instance secrets. It only:
+#   - pulls the latest repo (if a git checkout)
+#   - refreshes static config (nginx) and running services
+#   - re-applies site-level Nextcloud config overrides via occ
+#   - runs the official Nextcloud upgrade + repair
+#   - re-deploys systemd units/timers and cron (grep-guarded)
+#   - finishes with a health check
+phase_update() {
+  require_root
+  log "Phase U: CloudVault update / maintenance (idempotent)"
+  detect_os
+
+  # 1. Pull latest repo if it's a git checkout
+  if [[ -d "${DEPLOY_DIR}/.git" ]]; then
+    log "Pulling latest CloudVault repo..."
+    git -C "${DEPLOY_DIR}" pull --ff-only 2>/dev/null \
+      && log "Repo up to date." || warn "git pull skipped/failed (continue anyway)."
+  fi
+
+  # 2. Refresh nginx config + reload (config accepted before reload)
+  #    Fall back to the currently-configured domain when not persisted.
+  if [[ "${NC_DOMAIN}" == "localhost" && -f /etc/nginx/sites-available/cloudvault.conf ]]; then
+    local cur_domain
+    cur_domain="$(sed -n 's/^[[:space:]]*server_name[[:space:]]*\([^;]*\);/\1/p' \
+      /etc/nginx/sites-available/cloudvault.conf | head -1 | tr -d '[:space:]')"
+    if [[ -n "${cur_domain}" ]]; then
+      NC_DOMAIN="${cur_domain}"
+      log "Update using existing domain: ${NC_DOMAIN}"
+    fi
+  fi
+  if [[ -d "${CONFIG_DIR}/nginx" ]]; then
+    cp -r "${CONFIG_DIR}/nginx/." /etc/nginx/
+    local site=/etc/nginx/sites-available/cloudvault.conf
+    if [[ -f "${site}" ]]; then
+      sed -i "s|__NC_DOMAIN__|${NC_DOMAIN}|g" "${site}"
+      ln -sf "${site}" /etc/nginx/sites-enabled/cloudvault.conf
+      nginx -t && systemctl reload nginx || warn "nginx config invalid — not reloaded."
+    fi
+  fi
+
+  # 3. Re-apply Nextcloud site-level config (idempotent) + core upgrade/repair
+  if [[ -f "${NC_BASE}/occ" ]]; then
+    occ config:system:set trusted_domains 0 --value="${NC_DOMAIN}" 2>/dev/null || true
+    occ config:system:set allow_user_registration --value=false --type=boolean 2>/dev/null || true
+    occ config:system:set lost_password_link --value="" 2>/dev/null || true
+    occ maintenance:mode --off 2>/dev/null || true
+    log "Running occ upgrade..."
+    occ upgrade 2>&1 | tee -a "${LOG}" || warn "occ upgrade reported issues (see log)."
+    log "Running occ maintenance:repair..."
+    occ maintenance:repair 2>&1 | tee -a "${LOG}" || true
+  else
+    warn "Nextcloud occ not found; skipping upgrade/repair."
+  fi
+
+  # 4. Refresh cron (grep-guarded, idempotent)
+  if ! ( crontab -l 2>/dev/null | grep -q 'nextcloud/cron.php' ); then
+    ( crontab -l 2>/dev/null; echo "*/5 * * * * php -f ${NC_BASE}/cron.php" ) | crontab -
+  fi
+
+  # 5. Re-deploy systemd timer units (overwrite-safe) + reload/enable
+  if [[ -f "${DEPLOY_DIR}/scripts/maintenance.sh" ]]; then
+    systemctl daemon-reload
+    systemctl enable --now \
+      cloudvault-maintenance.timer \
+      cloudvault-backup.timer \
+      cloudvault-healthcheck.timer 2>/dev/null || true
+  fi
+
+  # 6. Final health check
+  if [[ -x "${DEPLOY_DIR}/scripts/healthcheck.sh" ]]; then
+    log "Running health check..."
+    bash "${DEPLOY_DIR}/scripts/healthcheck.sh" || warn "Health check found issues."
+  fi
+
+  # 7. Refresh security monitoring (collector + alert rules), idempotent
+  if command -v systemctl >/dev/null 2>&1; then
+    install -d -m 0755 /var/lib/node_exporter/textfile_collector 2>/dev/null || true
+    install -m 0755 "${SCRIPT_DIR}/fail2ban-collector.sh" /opt/cloudvault/scripts/fail2ban-collector.sh 2>/dev/null || true
+    if [[ -f /etc/prometheus/alert.rules.yml ]]; then
+      install -m 0644 -o prometheus -g prometheus \
+        "${CONFIG_DIR}/prometheus/alert.rules.yml" /etc/prometheus/alert.rules.yml 2>/dev/null || true
+    fi
+    systemctl daemon-reload
+    systemctl enable --now cloudvault-fail2ban.timer 2>/dev/null || true
+    systemctl reload prometheus 2>/dev/null || true
+    log "Security monitoring refreshed."
+  fi
+
+  log "Phase U complete. CloudVault is up to date."
+}
+
+# ---------------------------------------------------------------------------
 # dispatch
 # ---------------------------------------------------------------------------
 deploy_scripts
-case "${1:-all}" in
-  all)        phase1_prep; phase2_packages; phase3_database; phase3_nextcloud;
+load_secrets
+case "${1:-wizard}" in
+  wizard)     # default: interactive wizard then full automated deployment
+              run_wizard
+              phase1_prep; phase2_packages; phase3_database; phase3_nextcloud;
               phase4_web; phase5_security; phase6_features;
-              phase8_backup; phase7_monitoring; phase9_watchtower ;;
-  prep)       phase1_prep ;;
-  packages)   phase2_packages ;;
-  database)   phase3_database ;;
-  nextcloud)  phase3_nextcloud ;;
-  web)        phase4_web ;;
-  security)   phase5_security ;;
-  features)   phase6_features ;;
-  monitoring) phase7_monitoring ;;
-  backup)     phase8_backup ;;
-  watchtower) phase9_watchtower ;;
-  telegram)   phase10_telegram ;;
+              phase8_backup; phase7_monitoring; phase9_watchtower;
+              phase10_telegram
+              telegram_final_ping ;;
+  all)        detect_os
+              phase1_prep; phase2_packages; phase3_database; phase3_nextcloud;
+              phase4_web; phase5_security; phase6_features;
+              phase8_backup; phase7_monitoring; phase9_watchtower;
+              phase10_telegram ;;
+  prep)       detect_os; phase1_prep ;;
+  packages)   detect_os; phase2_packages ;;
+  database)   detect_os; phase3_database ;;
+  nextcloud)  detect_os; phase3_nextcloud ;;
+  web)        detect_os; phase4_web ;;
+  security)   detect_os; phase5_security ;;
+  features)   detect_os; phase6_features ;;
+  monitoring) detect_os; phase7_monitoring ;;
+  backup)     detect_os; phase8_backup ;;
+  watchtower) detect_os; phase9_watchtower ;;
+  telegram)   detect_os; phase10_telegram ;;
+  update)     phase_update ;;
   *) echo "Unknown stage: ${1:-}"; exit 2 ;;
 esac
 

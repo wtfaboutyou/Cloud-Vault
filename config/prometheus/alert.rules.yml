@@ -69,3 +69,41 @@ groups:
           severity: warning
         annotations:
           summary: "PostgreSQL replication lag above 30s"
+
+  - name: cloudvault-security
+    rules:
+      - alert: ActiveBannedIPsHigh
+        expr: cloudvault_fail2ban_active_bans > 5
+        for: 5m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "High number of currently-banned IPs ({{ $value }})"
+
+      - alert: TotalBansSpike
+        expr: increase(cloudvault_fail2ban_total_bans[15m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "Fail2ban issued {{ $value }} new bans in the last 15m"
+
+      - alert: HTTPRequestRateSpike
+        expr: rate(nginx_http_requests_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "Spike in HTTP request rate (possible scraping/attack): {{ $value }} req/s"
+
+      - alert: TCPConnectionsHigh
+        expr: node_netstat_Tcp_CurrEstab > 500
+        for: 10m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "Unusually high number of established TCP connections ({{ $value }})"

@@ -1,13 +1,75 @@
 # INSTALLATION.md
 
-Complete step-by-step guide to deploy CloudVault natively on **Debian 13 (Trixie)**.
+CloudVault deploys natively (no Docker). Deployment is **wizard-driven**: get
+the repo onto the server, run `install.sh`, answer ~5 questions, then everything
+is automated.
 
-The deployment is orchestrated by `scripts/install.sh` in **9 phases**. Each phase is
-also callable independently, which lets you pause, verify, and resume.
+**A. Interactive wizard** — `sudo bash scripts/install.sh` asks ~5 questions, then
+fully automates the rest and sends a final "CloudVault connected" Telegram test
+message.
+
+**B. Stage-based (power users)** — `sudo bash scripts/install.sh <stage>` runs a
+single phase and is idempotent (safe to re-run / resume).
+
+Supported OS (auto-detected from `/etc/os-release`, picks the native PHP version):
+Debian 13 (Trixie, PHP 8.4), Debian 12 (Bookworm, PHP 8.2), Ubuntu 24.04 (Noble,
+PHP 8.3), Ubuntu 22.04 (Jammy, PHP 8.1).
 
 ---
 
-## 1. Prerequisites
+## 0. Get the repository on the server
+
+```bash
+# via git (recommended; keeps repo /opt/cloudvault up to date with `git pull`)
+git clone https://github.com/wtfaboutyou/Cloud-Vault.git /opt/cloudvault
+
+# or copy from your workstation (no git needed on the server)
+scp -r cloudvault root@<server>:/opt/cloudvault
+```
+
+> On first run `install.sh` copies itself to `/opt/cloudvault/scripts/` so systemd
+> timers reference a stable path.
+
+---
+
+## 1. Wizard (interactive)
+
+```bash
+cd /opt/cloudvault
+sudo bash scripts/install.sh
+```
+
+The wizard collects (in order, then **no further input is required**):
+
+```text
+Domain (FQDN or server IP)
+Admin email
+Admin password            (blank = auto-generate)
+Telegram bot token        (from @BotFather)   ← last input
+Telegram chat id          (e.g. -1001234567890)
+```
+
+After the last Telegram input, the deployment runs automatically:
+
+```
+prep         : apt update + base packages
+phases 1-10  : nginx, php-fpm, postgres, redis, clamav,
+               prometheus, grafana, alertmanager, fail2ban, ...
+               download Nextcloud (~300MB) + install
+               files_antivirus, backup timers, watchtower bot
+finalise     : SSL cert -> "CloudVault connected" Telegram test -> audit report
+```
+
+> If a step fails (e.g. `apt` error, Nextcloud tarball download failed) the script
+> stops and reports which step failed. Just run `./install.sh` again — it is
+> idempotent and resumes from the unfinished step.
+
+> See [AUTOMATION.md](AUTOMATION.md) for the full automation flow, architecture
+> diagram, and idempotency/resume design.
+
+---
+
+## 2. Prerequisites
 
 - **Hardware**: 2 vCPU / 4 GB RAM minimum (8 GB recommended; 16 GB with heavy ClamAV).
 - **Storage**: 50 GB free on root, plus a data volume for `/var/www/nextcloud/data`.
@@ -24,21 +86,6 @@ cat /etc/debian_version     # 13.x (Trixie)
 lsb_release -a
 nproc && free -h && df -h / /var 2>/dev/null
 ```
-
----
-
-## 2. Repository Deployment
-
-```bash
-# from your workstation
-scp -r cloudvault root@<server>:/opt/cloudvault
-
-# on the server
-cd /opt/cloudvault
-```
-
-> On first run `install.sh` copies itself to `/opt/cloudvault/scripts/` so systemd
-> timers reference a stable path.
 
 ---
 
@@ -176,6 +223,17 @@ NC_DOMAIN=localhost ADMIN_EMAIL=admin@localhost \
 
 > **Without a domain**: Run with `NC_DOMAIN=<server-ip>` and `ENABLE_LETSENCRYPT=no`.
 > The installer will use a self-signed certificate. Access via `https://<server-ip>`.
+
+### Update / maintenance (idempotent, safe to re-run)
+
+```bash
+sudo bash scripts/install.sh update
+```
+
+Pulls the latest repo, refreshes Nginx config + service reload, re-applies
+Nextcloud `occ` settings, runs `occ upgrade` + `maintenance:repair`, refreshes
+timers/cron, and runs a health check. It **never touches user data** (does not
+rewrite `config.php` or reset instance secrets).
 
 ---
 

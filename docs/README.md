@@ -58,6 +58,7 @@ cloudvault/
 │   └── prometheus/ (prometheus.yml, alert.rules.yml)
 ├── docs/                      # documentation
 │   ├── INSTALLATION.md
+│   ├── AUTOMATION.md
 │   ├── DEPLOYMENT.md
 │   ├── SYSTEM_ARCHITECTURE.md
 │   ├── SECURITY.md
@@ -73,15 +74,14 @@ cloudvault/
 ## Quick Start
 
 ```bash
-# 1. Deploy the repository to the server
-scp -r cloudvault root@<server>:/opt/
+# 1. Get the repo on the server, then run the wizard installer
+git clone https://github.com/wtfaboutyou/Cloud-Vault.git /opt/cloudvault
+cd /opt/cloudvault && sudo bash scripts/install.sh
 
-# 2. Set required variables and run the full installer
-cd /opt/cloudvault
-NC_DOMAIN=localhost ADMIN_EMAIL=admin@localhost \
-  sudo bash scripts/install.sh all
+# (or, when only updating:)
+cd /opt/cloudvault && sudo bash scripts/install.sh update
 
-# 3. Verify
+# 2. Verify
 sudo bash scripts/healthcheck.sh
 curl -sI https://localhost | grep -i strict-transport-security
 ```
@@ -89,11 +89,13 @@ curl -sI https://localhost | grep -i strict-transport-security
 > **Without a domain**: Use `NC_DOMAIN=<server-ip>` and the installer will use a self-signed certificate. Access via `https://<server-ip>`.
 
 > Read **[INSTALLATION.md](INSTALLATION.md)** for prerequisites and step-by-step
-> phases, and **[DEPLOYMENT.md](DEPLOYMENT.md)** for post-install verification.
+> phases, **[AUTOMATION.md](AUTOMATION.md)** for how the wizard/automation flow
+> works, and **[DEPLOYMENT.md](DEPLOYMENT.md)** for post-install verification.
 
 ## Operations Cheat-Sheet
 
 ```bash
+sudo bash scripts/install.sh update                       # idempotent update/maintenance
 sudo bash /opt/cloudvault/scripts/backup.sh            # run a backup now
 sudo bash /opt/cloudvault/scripts/backup.sh verify     # verify latest archive
 sudo bash /opt/cloudvault/scripts/restore.sh           # restore latest archive
@@ -107,6 +109,7 @@ systemctl list-timers cloudvault-*                     # scheduled tasks
 | Document | Purpose |
 |----------|---------|
 | [INSTALLATION.md](INSTALLATION.md) | Prerequisites + phased installation |
+| [AUTOMATION.md](AUTOMATION.md) | Wizard flow, phases, idempotency/resume |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Post-install verification & go-live |
 | [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) | Architecture, flow, diagrams |
 | [SECURITY.md](SECURITY.md) | Hardening, firewall, Fail2ban, AV |
