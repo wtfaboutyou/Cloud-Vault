@@ -48,7 +48,7 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 | **Tanpa Docker / Container** | Semua via APT di Debian 13 (Trixie). Systemd native. *Lightweight, transparent, debuggable* — `systemctl status`, `journalctl`, `ss -ltnp` bekerja seperti biasa. |
 | **Performance Production-Grade** | HTTP/2 + Brotli + keepalive, PHP-FPM pool tuned (JIT, opcache, realpath cache), PostgreSQL `random_page_cost=1.1` untuk NVMe, Redis `allkeys-lru`, Nginx `fastcgi_buffering off` untuk streaming upload/download >10GB. Benchmark terukur (lihat `benchmark/results/`). |
 | **Operasional Otomatis** | - **Backup**: AES-256 + PBKDF2, retention 7/4/12 (daily/weekly/monthly), verify SHA-256 otomatis<br>- **Maintenance**: `occ cron` tiap 5 menit + daily `db:add-missing-indices`, `preview:pre-generate`, `files:scan --all` via systemd timer<br>- **Healthcheck**: `healthcheck.sh` cek service, disk, mem, SSL expiry, DB connectivity — output Prometheus-ready<br>- **Monitoring**: Prometheus + Grafana (loopback-only) + Alertmanager (disk >85%, service down, SSL <30 hari) |
-| **Infrastructure as Code** | Semua config di `config/` + installer `scripts/install.sh` (phased, idempotent). *GitOps-ready*: `git clone → sudo bash scripts/install.sh all → done`. Disaster recovery = `scripts/restore.sh` dari backup terenkripsi. |
+| **Infrastructure as Code** | Semua config di `config/` + installer `scripts/install.sh` (wizard-driven, phased, idempotent). *GitOps-ready*: `git clone → sudo bash scripts/install.sh → 5 pertanyaan wizard → otomatis sampai selesai → ping Telegram`. Disaster recovery = `scripts/restore.sh` dari backup terenkripsi. |
 | **Showcase Keahlian** | Project ini dibangun sebagai **portfolio bukti kompetensi**: Linux Server Admin, Web Server Architecture (Nginx tuning), Security Hardening (Fail2ban, UFW, TLS, AV), Performance Tuning (PHP, PG, Redis, Nginx), Infrastructure as Code (bash idempotent), Observability (Prometheus/Grafana). |
 
 ---
@@ -97,21 +97,43 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 ### Langkah-langkah Deployment
 
 ```bash
-# 1. Clone repository ke server
-scp -r cloudvault root@<server>:/opt/cloudvault
+# 1. Ambil repository ke server (clone atau scp)
+git clone https://github.com/wtfaboutyou/Cloud-Vault.git /opt/cloudvault
+# (atau: scp -r cloudvault root@<server>:/opt/cloudvault)
 
-# 2. Masuk ke direktori project
+# 2. Jalankan installer wizard (domain → email → password → Telegram)
 cd /opt/cloudvault
+sudo bash scripts/install.sh
+```
 
-# 3. Jalankan installer lengkap (tanpa domain, pakai self-signed cert)
-sudo bash scripts/install.sh all
+Wizard menanyakan **5 input** (domain, email admin, password admin, Telegram bot
+token, Telegram chat id) — **input terakhir = chat id**. Setelah itu deployment
+berjalan **otomatis tanpa input**: phase 1–10 (packages, DB, Nextcloud,
+TLS, security, ClamAV, backup, monitoring, watchtower, telegram) dan ditutup
+dengan test ping **"🚀 CloudVault connected"** ke Telegram.
 
-# 4. Verifikasi instalasi
+Tanpa domain publik, server memakai self-signed cert — akses via `https://<SERVER_IP>`.
+
+```bash
+# 3. Verifikasi instalasi
 sudo bash scripts/healthcheck.sh
 curl -skI https://localhost | grep -i strict-transport-security
 ```
 
-### Install Bertahap (Optional)
+### Update / maintenance (idempotent, aman diulang)
+
+```bash
+cd /opt/cloudvault && sudo bash scripts/install.sh update
+```
+
+Pulls repo terbaru, refresh Nginx, `occ upgrade` + `maintenance:repair`, refresh
+timer/cron, refresh security monitoring, healthcheck — **tidak pernah menyentuh
+data** (`config.php`/secret tidak ditulis ulang).
+
+### Install Bertahap (Optional / Resume)
+
+Gagal di satu phase? Jalankan ulang — idempotent, lanjut dari phase yang belum
+selesai (kredensial di-reload dari `.secrets/*.env`):
 
 ```bash
 # Phase 1: System preparation
@@ -135,11 +157,17 @@ sudo bash scripts/install.sh security
 # Phase 6: ClamAV & Maintenance timers
 sudo bash scripts/install.sh features
 
-# Phase 7: Backup infrastructure
+# Phase 8: Backup infrastructure
 sudo bash scripts/install.sh backup
 
-# Phase 8: Monitoring (optional)
+# Phase 7: Monitoring (optional)
 ENABLE_MONITORING=yes sudo bash scripts/install.sh monitoring
+
+# Phase 9: Watchtower foundation (optional)
+ENABLE_WATCHTOWER=yes sudo bash scripts/install.sh watchtower
+
+# Phase 10: Telegram foundation (optional)
+ENABLE_TELEGRAM=yes sudo bash scripts/install.sh telegram
 ```
 
 ### Post-Install Verification
@@ -166,7 +194,7 @@ sudo bash /opt/cloudvault/scripts/demo-features.sh
 
 Buka `https://<SERVER_IP>` atau `https://localhost` (di server) dan login dengan kredensial admin. Browser akan warning self-signed cert — klik "Advanced" → "Proceed".
 
-> Dokumentasi lengkap: [INSTALLATION.md](docs/INSTALLATION.md) | [DEPLOYMENT.md](docs/DEPLOYMENT.md)
+> Dokumentasi lengkap: [INSTALLATION.md](docs/INSTALLATION.md) | [AUTOMATION.md](docs/AUTOMATION.md) | [DEPLOYMENT.md](docs/DEPLOYMENT.md)
 
 ---
 
@@ -196,7 +224,8 @@ Akses setelah instalasi:
 cloudvault/
 ├── README.md                    # Project overview (this file)
 ├── scripts/                       # Deployment & operations scripts
-│   ├── install.sh              # Phased installer (prep → backup)
+│   ├── install.sh              # Wizard installer (5 input → auto deploy phases 1-10)
+│   ├── fail2ban-collector.sh   # Security metrics (fail2ban) → Prometheus
 │   ├── backup.sh               # Encrypted backup + retention
 │   ├── restore.sh              # Disaster recovery
 │   ├── healthcheck.sh          # Service/disk/memory/SSL status
@@ -210,7 +239,8 @@ cloudvault/
 │   ├── redis/
 │   ├── fail2ban/
 │   ├── ufw/
-│   └── prometheus/
+│   ├── prometheus/
+│   └── grafana/dashboards/
 ├── docs/                        # Full documentation
 │   ├── INSTALLATION.md
 │   ├── DEPLOYMENT.md
@@ -388,13 +418,14 @@ https://<SERVER_IP>/settings/telegram/
 cloudvault/
 ├── README.md                    # Project overview (this file)
 ├── scripts/                       # Deployment & operations scripts
-│   ├── install.sh              # Phased installer (prep → backup)
+│   ├── install.sh              # Wizard installer (5 input → auto deploy phases 1-10)
 │   ├── backup.sh               # Encrypted backup + retention
 │   ├── restore.sh              # Disaster recovery
 │   ├── healthcheck.sh          # Service/disk/memory/SSL status
 │   ├── healthcheck-prom.sh     # Prometheus-formatted healthcheck
 │   ├── maintenance.sh          # Daily OCC maintenance tasks
 │   ├── demo-features.sh        # 6 Advanced features demo script
+│   ├── fail2ban-collector.sh   # Security metrics (fail2ban) → Prometheus
 │   ├── benchmark/              # Benchmark scripts
 │   └── watchtower/             # CloudVault Watchtower (Telegram integration)
 │       ├── watchtower.py           # Main service (health, status, metrics, API)
