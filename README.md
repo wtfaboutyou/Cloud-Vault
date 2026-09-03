@@ -79,6 +79,7 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 |----------|-----------|
 | ![Dashboard Nextcloud](docs/assets/screenshots/dashboard.png) | Dashboard Nextcloud setelah login |
 | ![Grafana Dashboard](docs/assets/screenshots/grafana.png) | Monitoring dashboard Grafana |
+| ![Bot Telegram](docs/assets/screenshots/bot-telegram.png) | Bot Telegram |
 
 **Video Demo:** [Demo in youtube](https://youtu.be/seR0e7_DhHE?si=Lz9v-fN7mVC4BGiC)
 
