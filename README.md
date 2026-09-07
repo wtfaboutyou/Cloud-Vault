@@ -8,6 +8,34 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 
 ---
 
+## ⚡ Quickstart (untuk klien / mentor)
+
+Deploy CloudVault penuh dalam 3 perintah langsung di server (Debian 13/12 atau
+Ubuntu 22.04/24.04):
+
+```bash
+# 1. Ambil repository ke server
+git clone https://github.com/wtfaboutyou/Cloud-Vault.git /opt/cloudvault
+
+# 2. Jalankan installer (5 pertanyaan: domain, email, password admin,
+#    token & chat id Telegram → sisanya otomatis, phase 1–10)
+cd /opt/cloudvault && sudo bash scripts/install.sh
+
+# 3. Verifikasi instalasi
+sudo bash scripts/healthcheck.sh
+```
+
+Setelah itu sistem berjalan **sendiri**: backup terenkripsi (AES-256) tiap
+03:00, monitoring Prometheus/Grafana, maintenance harian, dan notifikasi
+Telegram lewat Watchtower.
+
+Opsi lanjutan (untuk tim infra):
+- **Deploy via Ansible** (one-click dari laptop, IaC) → [§3b](#3b-deploy-via-ansible-iac--one-click-dari-luar-server)
+- **Disaster recovery** (server mati total) → [DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md)
+- **Offsite backup USB** → [usb-backup.sh](scripts/usb-backup.sh) & [BACKUP.md](docs/BACKUP.md)
+
+---
+
 ## 🎯 Masalah yang Memicu Pembuatan CloudVault
 
 ### 1. **Kecemasan Privasi Data & Ketergantungan Vendor (Vendor Lock-in)**
@@ -18,7 +46,7 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 ### 2. **Biaya Berkelanjutan yang Tidak Terduga**
 - Model *per-user/per-month* pada SaaS enterprise (Google Workspace, Microsoft 365, Box, Egnyte) mengakibatkan biaya operasional (OpEx) yang tumbuh linear dengan jumlah karyawan.
 - Fitur *advanced security, DLP, eDiscovery, retention policies* terkunci di tier paling mahal.
-- Tidak ada opsi *cap-ex* (belum investasi hardware sendiri) untuk organisasi yang punya tim infra & बजट hardware.
+- Tidak ada opsi *cap-ex* (belum investasi hardware sendiri) untuk organisasi yang punya tim infra & budget hardware.
 
 ### 3. **Kurangnya Kontrol Keamanan & Kepatuhan (Compliance)**
 - Cloud publik menawarkan *shared responsibility model* tapi konfigurasi keamanan granular (CSP header, rate limiting, cipher suite, WAF rules, antivirus scanning per-upload) sering *opinionated* atau tidak bisa di-*customize* penuh.
@@ -454,8 +482,6 @@ journalctl -u cloudvault-watchtower -f
 # Settings page
 https://<SERVER_IP>/settings/telegram/
 ```
-
----
 
 ---
 
