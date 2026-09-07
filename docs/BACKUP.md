@@ -91,7 +91,14 @@ sudo bash /opt/cloudvault/scripts/restore.sh
 
 # restore a specific archive
 sudo bash /opt/cloudvault/scripts/restore.sh /opt/cloudvault/backup/daily/cloudvault-daily-20260715-030000.tar.enc
+
+# pull the archive from the USB offsite mirror first, then restore
+sudo bash /opt/cloudvault/scripts/restore.sh --from-usb
 ```
+
+> **Full bare-metal recovery** (server mati total) bukan rollback biasa — lihat
+> [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) untuk `dr-recover.sh` /
+> `dr-recover.yml` (Tier-2).
 
 ### Manual decrypt (emergency)
 
@@ -111,14 +118,43 @@ tar -tvf plain.tar
 
 ## 9. Offsite Replication
 
-Recommended: mirror `/opt/cloudvault/backup` offsite after each run, e.g.
+Disaster recovery sejati membutuhkan backup yang **selamat walau server mati
+total**. Backups lokal (`/opt/cloudvault/backup`) hilang kalau disk/server
+hilang — jadi pastikan ada salinan di luar server.
+
+### A. Self-hosted USB (disarankan untuk project ini)
+
+`scripts/usb-backup.sh` memirror backup terenkripsi ke USB dengan label
+`CLOUDVAULT-BACKUP` (mount by LABEL — sama-sama jalan di VM setelah USB di-attach
+oleh hypervisor, maupun di fisik langsung):
+
+```bash
+sudo bash /opt/cloudvault/scripts/usb-backup.sh            # mirror lokal -> USB
+sudo bash /opt/cloudvault/scripts/usb-backup.sh --umount   # mirror + unmount (aman dibawa)
+```
+
+- Dipanggil otomatis di akhir `backup.sh` (gagal mirror TIDAK membuat backup
+  dianggap gagal — dilaporkan terpisah).
+- Simpan **fisik USB di lokasi berbeda** dari server (ruang/gedung lain).
+- Tarik saat recovery: `restore.sh --from-usb`, atau `dr-recover.sh --from-usb`.
+
+### B. Object storage (opsional/level berikutnya)
+
+Untuk offsite geografis murni (mis. Backblaze B2, S3-compatible), mirror via
+`rclone` setelah tiap backup:
 
 ```bash
 # in /etc/systemd/system/cloudvault-backup.service  (or a cron)
 rclone copy /opt/cloudvault/backup/daily remote:cloudvault/daily
 ```
 
-Add a second key copy alongside the offsite storage.
+Arsip sudah terenkripsi AES-256, jadi aman meski disimpan di cloud publik.
+Tambahkan salinan `backup.key` di lokasi yang sama dengan offsite storage.
+
+### Aturan kunci
+
+- **Back up `backup.key` offsite** (password manager, host terpisah, kopi fisik).
+  Tanpa kunci, semua arsip tidak dapat dibaca.
 
 ## 10. What Is NOT Backed Up
 

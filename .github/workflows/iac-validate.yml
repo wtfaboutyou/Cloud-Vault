@@ -1,0 +1,57 @@
+name: IAC Validate
+
+on:
+  push:
+    paths:
+      - 'ansible/**'
+      - '.github/workflows/iac-validate.yml'
+  pull_request:
+    paths:
+      - 'ansible/**'
+
+jobs:
+  ansible-syntax:
+    name: Ansible syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ansible + collection dependencies
+        run: |
+          pip install --break-system-packages "ansible" "ansible-lint"
+          ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Inventory template for syntax check
+        working-directory: ansible
+        run: |
+          cp inventory/hosts.example.yml inventory/hosts.yml
+          # inject a dummy host so playbooks can be parsed
+          sed -i 's/#         ansible_host: 192.168.1.100/         ansible_host: 127.0.0.1/' inventory/hosts.yml
+
+      - name: Ansible syntax-check all playbooks
+        working-directory: ansible
+        run: |
+          set -e
+          for pb in playbooks/*.yml; do
+            echo "== syntax-check $pb"
+            ansible-playbook --syntax-check "$pb" -i inventory/hosts.yml
+          done
+
+      - name: Ansible linter
+        working-directory: ansible
+        run: ansible-lint playbooks/*.yml
+
+  yamllint:
+    name: YAML lint (ansible dir)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ibiqlik/action-yamllint@v4
+        with:
+          file_or_dir: ansible
+          strict: false
+          config_data: |
+            extends: default
+            rules:
+              line-length: disable
+              comments: disable

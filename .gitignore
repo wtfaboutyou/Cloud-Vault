@@ -5,6 +5,12 @@
 backup.key
 config.php
 
+# Ansible local inventory & vault (real hosts / secrets are never committed)
+ansible/inventory/hosts.yml
+ansible/inventory/group_vars/vault.yml
+ansible/inventory/group_vars/all/vault.yml
+ansible/collections/
+
 # Backup artifacts
 backup/
 

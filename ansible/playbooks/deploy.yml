@@ -1,0 +1,36 @@
+---
+# Combined deploy playbook.
+#
+#   ansible-playbook playbooks/deploy.yml
+#   ansible-playbook playbooks/deploy.yml --ask-vault-pass
+#
+# Stages: bootstrap the host → deploy CloudVault (non-interactive install.sh)
+# → healthcheck. Idempotent: safe to re-run; a failed phase is resumed on the
+# next invocation by install.sh.
+#
+- name: CloudVault — bootstrap target host
+  hosts: cloudvault
+  gather_facts: false
+  roles:
+    - role: cloudvault_bootstrap
+      tags: [bootstrap]
+
+- name: CloudVault — deploy application
+  hosts: cloudvault
+  gather_facts: false
+  roles:
+    - role: cloudvault_deploy
+      tags: [deploy]
+
+- name: CloudVault — deploy sanity check
+  hosts: cloudvault
+  gather_facts: false
+  tasks:
+    - name: Final service check
+      ansible.builtin.command: systemctl is-active nginx php{{ cloudvault_php_version | default('8.4') }}-fpm postgresql redis-server
+      register: svc
+      changed_when: false
+      ignore_errors: true
+    - name: Show services status
+      ansible.builtin.debug:
+        var: svc.stdout_lines

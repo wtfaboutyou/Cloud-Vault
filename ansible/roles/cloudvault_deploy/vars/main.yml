@@ -1,0 +1,9 @@
+---
+# Role defaults for `cloudvault_deploy`.
+
+cloudvault_deploy_dir: /opt/cloudvault
+cloudvault_repo_url: https://github.com/wtfaboutyou/Cloud-Vault.git
+cloudvault_repo_version: main
+cloudvault_repo_local: ""
+cloudvault_bash: /usr/bin/env bash
+cloudvault_php_version: 8.4

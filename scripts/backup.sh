@@ -207,6 +207,16 @@ if (( BACKUP_EXIT_CODE == 0 )); then
   notify_watchtower "BACKUP_COMPLETED" "success" "Backup ${BACKUP_LABEL} completed" \
     "label=${BACKUP_LABEL}" "size=${BACKUP_SIZE}" "duration=${DURATION_FMT}"
   log "backup.sh finished"
+
+  # Offsite layer: mirror the local backup to a self-hosted USB (if present).
+  # Deliberately non-fatal — a failed USB mirror must not turn a successful
+  # backup into a failure; it is reported separately by usb-backup.sh.
+  if command -v "${SCRIPT_DIR}/usb-backup.sh" >/dev/null 2>&1 \
+     || [[ -x "${SCRIPT_DIR}/usb-backup.sh" ]]; then
+    log "USB offsite mirror hook (usb-backup.sh)..."
+    "${SCRIPT_DIR}/usb-backup.sh" >> "${LOG}" 2>&1 || \
+      log "WARN USB mirror reported non-zero exit — see usb-backup.log"
+  fi
 else
   DURATION_FMT="$(( BACKUP_DURATION / 60 ))m $(( BACKUP_DURATION % 60 ))s"
   notify_watchtower "BACKUP_FAILED" "error" "Backup ${BACKUP_LABEL} failed" \

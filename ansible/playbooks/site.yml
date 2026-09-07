@@ -1,0 +1,13 @@
+---
+# site.yml — canonical operational entrypoint.
+#
+# By default this runs a FULL deploy (bootstrap + install.sh + healthcheck).
+# Update and disaster-recovery are kept as SEPARATE entrypoints so they can
+# never be triggered by accident during a routine apply:
+#
+#   ansible-playbook site.yml                    → full deploy (default)
+#   ansible-playbook playbooks/update.yml        → idempotent update
+#   ansible-playbook playbooks/dr-recover.yml    → bare-metal disaster recovery
+#
+- name: CloudVault — deploy
+  ansible.builtin.import_playbook: deploy.yml

@@ -209,3 +209,60 @@ client re-runs ./install.sh  →  skips done steps, continues unfinished
 | Telegram token / chat id      | `.secrets/telegram.env` (enables bot) |
 
 > **Back up `/opt/cloudvault/.secrets/` and the AES-256 backup key offsite.**
+
+---
+
+## Ansible — IaC (control node → target)
+
+Di atas installer bash, CloudVault menyediakan lapisan **Ansible** sebagai IaC
+standar industri. Ansible **tidak menulis ulang** `install.sh` — ia
+meng-*orchestrate*: push repo, set environment, jalankan phase idempotent, lalu
+healthcheck. Ini menjaga `config/` + `scripts/` tetap satu source-of-truth.
+
+Struktur `ansible/`:
+
+```
+ansible/
+├── ansible.cfg                  # inventory, SSH timings
+├── inventory/
+│   ├── hosts.example.yml        # template → copy ke hosts.yml (gitignored)
+│   └── group_vars/all.yml       # default non-secret
+├── playbooks/
+│   ├── deploy.yml               # bootstrap + install.sh all + healthcheck
+│   ├── update.yml               # install.sh update (idempotent)
+│   ├── dr-recover.yml           # bare-metal disaster recovery (Tier-2)
+│   └── site.yml                 # default entrypoint (deploy)
+├── roles/
+│   ├── cloudvault_bootstrap/    # base OS, swap, tz, chrony
+│   ├── cloudvault_deploy/       # clone/rsync repo + jalankan install.sh
+│   └── cloudvault_dr/           # preflight + restore orchestration
+└── vars/secret.example.yml      # template variabel rahasia (Ansible Vault)
+```
+
+```
+Control node (laptop / CI)
+   │  SSH (agentless)
+   ▼
+Target server: ansible ctx — clone/rsync → install.sh all → healthcheck
+```
+
+### Cara pakai
+
+```bash
+cd ansible
+cp inventory/hosts.example.yml inventory/hosts.yml      # isi host target
+ansible-vault create inventory/group_vars/vault.yml     # admin/DB/Redis/Telegram
+
+ansible-playbook playbooks/deploy.yml --ask-vault-pass   # deploy penuh
+ansible-playbook playbooks/update.yml --ask-vault-pass   # update idempotent
+ansible-playbook playbooks/dr-recover.yml \
+    -e cloudvault_backup_key_local=$HOME/vault/backup.key --ask-vault-pass  # DR
+```
+
+Rahasia (admin password, DB/Redis password, token Telegram) disimpan di Ansible
+Vault (`vault.yml`, gitignored) — tidak pernah hardcode di playbook/inventory.
+
+> Hubungan env var Ansible ↔ install.sh:
+> `NC_DOMAIN` ⟵ `cloudvault_domain`, `ADMIN_EMAIL` ⟵ `cloudvault_admin_email`,
+> `ADMIN_USER` ⟵ `cloudvault_admin_user`, `NC_ADMIN_PASS` ⟵
+> `vault_cloudvault_admin_password`, dst (lihat `roles/cloudvault_deploy`).

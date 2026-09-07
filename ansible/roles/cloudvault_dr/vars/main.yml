@@ -1,0 +1,9 @@
+---
+# Role defaults for `cloudvault_dr`.
+
+cloudvault_backup_key_local: ""
+cloudvault_restore_archive: ""
+cloudvault_usb_enabled: false
+cloudvault_usb_label: CLOUDVAULT-BACKUP
+cloudvault_usb_mount: /mnt/usbbackup
+cloudvault_deploy_dir: /opt/cloudvault

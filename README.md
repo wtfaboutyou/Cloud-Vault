@@ -48,8 +48,8 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 | **Tanpa Docker / Container** | Semua via APT di Debian 13 (Trixie). Systemd native. *Lightweight, transparent, debuggable* — `systemctl status`, `journalctl`, `ss -ltnp` bekerja seperti biasa. |
 | **Performance Production-Grade** | HTTP/2 + Brotli + keepalive, PHP-FPM pool tuned (JIT, opcache, realpath cache), PostgreSQL `random_page_cost=1.1` untuk NVMe, Redis `allkeys-lru`, Nginx `fastcgi_buffering off` untuk streaming upload/download >10GB. Benchmark terukur (lihat `benchmark/results/`). |
 | **Operasional Otomatis** | - **Backup**: AES-256 + PBKDF2, retention 7/4/12 (daily/weekly/monthly), verify SHA-256 otomatis<br>- **Maintenance**: `occ cron` tiap 5 menit + daily `db:add-missing-indices`, `preview:pre-generate`, `files:scan --all` via systemd timer<br>- **Healthcheck**: `healthcheck.sh` cek service, disk, mem, SSL expiry, DB connectivity — output Prometheus-ready<br>- **Monitoring**: Prometheus + Grafana (loopback-only) + Alertmanager (disk >85%, service down, SSL <30 hari) |
-| **Infrastructure as Code** | Semua config di `config/` + installer `scripts/install.sh` (wizard-driven, phased, idempotent). *GitOps-ready*: `git clone → sudo bash scripts/install.sh → 5 pertanyaan wizard → otomatis sampai selesai → ping Telegram`. Disaster recovery = `scripts/restore.sh` dari backup terenkripsi. |
-| **Showcase Keahlian** | Project ini dibangun sebagai **portfolio bukti kompetensi**: Linux Server Admin, Web Server Architecture (Nginx tuning), Security Hardening (Fail2ban, UFW, TLS, AV), Performance Tuning (PHP, PG, Redis, Nginx), Infrastructure as Code (bash idempotent), Observability (Prometheus/Grafana). |
+| **Infrastructure as Code** | Semua config di `config/` + installer `scripts/install.sh` (wizard-driven, phased, idempotent) + **lapisan Ansible** (`ansible/`) yang men-deploy dari dalam ataupun luar node. *GitOps-ready*: `git clone → sudo bash scripts/install.sh → 5 pertanyaan wizard → otomatis selesai → ping Telegram`, atau `ansible-playbook ansible/playbooks/deploy.yml` dari control node. Disaster recovery = `scripts/restore.sh` dari backup terenkripsi (Tier-1) atau `scripts/dr-recover.sh`/`dr-recover.yml` (Tier-2, bare-metal). |
+| **Showcase Keahlian** | Project ini dibangun sebagai **portfolio bukti kompetensi**: Linux Server Admin, Web Server Architecture (Nginx tuning), Security Hardening (Fail2ban, UFW, TLS, AV), Performance Tuning (PHP, PG, Redis, Nginx), Infrastructure as Code (Ansible + bash idempotent + config-as-code), Backup & Disaster Recovery (AES-256 + retention + bare-metal DR runbook), Observability (Prometheus/Grafana). |
 
 ---
 
@@ -194,7 +194,40 @@ sudo bash /opt/cloudvault/scripts/demo-features.sh
 
 Buka `https://<SERVER_IP>` atau `https://localhost` (di server) dan login dengan kredensial admin. Browser akan warning self-signed cert — klik "Advanced" → "Proceed".
 
-> Dokumentasi lengkap: [INSTALLATION.md](docs/INSTALLATION.md) | [AUTOMATION.md](docs/AUTOMATION.md) | [DEPLOYMENT.md](docs/DEPLOYMENT.md)
+> Dokumentasi lengkap: [INSTALLATION.md](docs/INSTALLATION.md) | [AUTOMATION.md](docs/AUTOMATION.md) | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | [DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md)
+
+---
+
+## 3b. Deploy via Ansible (IaC — one-click dari luar server)
+
+Aneh dengan self-hosted? Ansible adalah **config-management agentless** yang
+berjalan via SSH dari control node ke target — tidak butuh Docker/agent/cloud,
+persis sejalan dengan filosofi project. Ansible hanya **meng-orchestrate**
+`install.sh` yang sudah ada (bukan menulis ulang), jadi tetap satu
+source-of-truth.
+
+```bash
+# 0. Control node: install ansible
+#    Ubuntu/Debian:  sudo apt install ansible-core;  pip install ansible
+
+# 1. Siapkan inventory & Vault (sekali)
+cd ansible
+cp inventory/hosts.example.yml inventory/hosts.yml        # isi host target
+ansible-vault create inventory/group_vars/vault.yml       # admin/DB/Redis/Telegram
+
+# 2. SATU PERINTAH — deploy penuh (bootstrap + install.sh + healthcheck)
+ansible-playbook playbooks/deploy.yml --ask-vault-pass
+
+#    Update idempotent (aman, tidak menyentuh data)
+ansible-playbook playbooks/update.yml --ask-vault-pass
+
+#    Disaster recovery bare-metal (server fresh OS) — Tier-2
+ansible-playbook playbooks/dr-recover.yml \
+    -e cloudvault_backup_key_local=$HOME/vault/backup.key --ask-vault-pass
+```
+
+Struktur & cara kerja lengkap: [AUTOMATION.md](docs/AUTOMATION.md) (bagian Ansible)
+dan [DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md).
 
 ---
 
@@ -225,13 +258,19 @@ cloudvault/
 ├── README.md                    # Project overview (this file)
 ├── scripts/                       # Deployment & operations scripts
 │   ├── install.sh              # Wizard installer (5 input → auto deploy phases 1-10)
-│   ├── fail2ban-collector.sh   # Security metrics (fail2ban) → Prometheus
 │   ├── backup.sh               # Encrypted backup + retention
-│   ├── restore.sh              # Disaster recovery
+│   ├── restore.sh              # Disaster recovery (Tier-1)
+│   ├── dr-recover.sh           # Full bare-metal recovery (Tier-2, fallback bash)
+│   ├── usb-backup.sh           # Offsite mirror to self-hosted USB (by LABEL)
 │   ├── healthcheck.sh          # Service/disk/memory/SSL status
-│   ├── healthcheck-prom.sh     # Prometheus-formatted healthcheck
 │   ├── maintenance.sh          # Daily OCC maintenance tasks
 │   └── benchmark/              # Benchmark scripts
+├── ansible/                      # Infrastructure as Code (control node → target)
+│   ├── ansible.cfg
+│   ├── inventory/              # hosts.example.yml + group_vars (vault for secrets)
+│   ├── playbooks/              # deploy.yml, update.yml, dr-recover.yml, site.yml
+│   ├── roles/                  # cloudvault_bootstrap / deploy / dr
+│   └── vars/secret.example.yml # template variabel rahasia
 ├── config/                      # Production configuration files
 │   ├── nginx/
 │   ├── php/8.4/fpm/pool.d/
@@ -240,22 +279,14 @@ cloudvault/
 │   ├── fail2ban/
 │   ├── ufw/
 │   ├── prometheus/
-│   └── grafana/dashboards/
-├── docs/                        # Full documentation
-│   ├── INSTALLATION.md
-│   ├── DEPLOYMENT.md
-│   ├── SYSTEM_ARCHITECTURE.md
-│   ├── SECURITY.md
-│   ├── PERFORMANCE.md
-│   ├── BACKUP.md
-│   ├── MONITORING.md
-│   ├── DEMO_VIDEO.md
-│   └── assets/                  # Screenshots, diagrams (to be added)
+│   ├── grafana/dashboards/
+│   └── watchtower/             # Watchtower systemd service
+├── sql/                         # PostgreSQL schemas (Telegram linking)
 ├── apps/                        # Custom Nextcloud apps (empty)
+├── docs/                        # Full documentation (incl. DISASTER_RECOVERY.md)
 ├── web/                         # Static web assets
-│   └── demo/                    # Demo login page (portfolio showcase)
-│       ├── index.html
-│       └── assets/
+│   ├── demo/                    # Demo login page (portfolio showcase)
+│   └── telegram/settings/       # Telegram notification settings UI
 └── benchmark/results/           # Benchmark output files
 ```
 
@@ -267,7 +298,19 @@ cloudvault/
 # Backup & Restore
 sudo bash /opt/cloudvault/scripts/backup.sh            # Run backup now
 sudo bash /opt/cloudvault/scripts/backup.sh verify     # Verify latest archive
-sudo bash /opt/cloudvault/scripts/restore.sh           # Restore latest archive
+sudo bash /opt/cloudvault/scripts/restore.sh           # Restore latest archive (Tier-1)
+sudo bash /opt/cloudvault/scripts/restore.sh --from-usb# Pull from USB offsite first
+sudo bash /opt/cloudvault/scripts/dr-recover.sh        # Full bare-metal recovery (Tier-2)
+
+# Offsite USB
+sudo bash /opt/cloudvault/scripts/usb-backup.sh            # Mirror backup -> USB
+sudo bash /opt/cloudvault/scripts/usb-backup.sh --umount   # + unmount (safe to carry)
+
+# IaC — deploy/update/DR via Ansible (dari control node)
+cd ansible
+ansible-playbook playbooks/deploy.yml --ask-vault-pass
+ansible-playbook playbooks/update.yml --ask-vault-pass
+ansible-playbook playbooks/dr-recover.yml -e cloudvault_backup_key_local=$HOME/backup.key --ask-vault-pass
 
 # Health & Maintenance
 sudo bash /opt/cloudvault/scripts/healthcheck.sh       # Full health report
@@ -298,6 +341,7 @@ sudo bash /opt/cloudvault/scripts/demo-features.sh     # Run all 6 feature demos
 | [SECURITY.md](docs/SECURITY.md) | Hardening, firewall, Fail2ban, AV |
 | [PERFORMANCE.md](docs/PERFORMANCE.md) | Tuning, compression, benchmarking |
 | [BACKUP.md](docs/BACKUP.md) | Backup/restore strategy & recovery |
+| [DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md) | DR runbook (RTO/RPO, bare-metal recovery, pengujian) |
 | [MONITORING.md](docs/MONITORING.md) | Prometheus, Grafana, alerting |
 
 ---
@@ -411,65 +455,6 @@ https://<SERVER_IP>/settings/telegram/
 ```
 
 ---
-
-## Repository Structure
-
-```
-cloudvault/
-├── README.md                    # Project overview (this file)
-├── scripts/                       # Deployment & operations scripts
-│   ├── install.sh              # Wizard installer (5 input → auto deploy phases 1-10)
-│   ├── backup.sh               # Encrypted backup + retention
-│   ├── restore.sh              # Disaster recovery
-│   ├── healthcheck.sh          # Service/disk/memory/SSL status
-│   ├── healthcheck-prom.sh     # Prometheus-formatted healthcheck
-│   ├── maintenance.sh          # Daily OCC maintenance tasks
-│   ├── demo-features.sh        # 6 Advanced features demo script
-│   ├── fail2ban-collector.sh   # Security metrics (fail2ban) → Prometheus
-│   ├── benchmark/              # Benchmark scripts
-│   └── watchtower/             # CloudVault Watchtower (Telegram integration)
-│       ├── watchtower.py           # Main service (health, status, metrics, API)
-│       ├── telegram_bot.py         # Telegram bot (webhook/polling, commands)
-│       ├── telegram_linking.py     # Account linking (SHA-256 tokens, PostgreSQL)
-│       ├── notification_queue.py   # Redis-backed notification queue
-│       └── watchtower_metrics.py   # Prometheus metrics for Watchtower
-├── config/                      # Production configuration files
-│   ├── nginx/
-│   ├── php/8.4/fpm/pool.d/
-│   ├── postgresql/17/main/
-│   ├── redis/
-│   ├── fail2ban/
-│   ├── ufw/
-│   ├── prometheus/
-│   ├── grafana/                # Grafana dashboards
-│   └── watchtower/             # Watchtower systemd service
-├── sql/                         # PostgreSQL schemas
-│   └── telegram_link.sql           # Telegram linking tables
-├── web/                         # Static web assets
-│   ├── demo/                    # Demo login page (portfolio showcase)
-│   │   ├── index.html
-│   │   └── assets/
-│   └── telegram/settings/       # Telegram settings page
-│       ├── index.html
-│       └── assets/
-├── tests/                       # Test suite
-│   ├── test_telegram_linking.py
-│   ├── test_alertmanager_integration.py
-│   ├── test_event_notifications.py
-│   ├── test_notification_queue.py
-│   └── test_watchtower_metrics.py
-├── docs/                        # Full documentation
-│   ├── INSTALLATION.md
-│   ├── DEPLOYMENT.md
-│   ├── SYSTEM_ARCHITECTURE.md
-│   ├── SECURITY.md
-│   ├── PERFORMANCE.md
-│   ├── BACKUP.md
-│   ├── MONITORING.md
-│   └── DEMO_VIDEO.md
-├── apps/                        # Custom Nextcloud apps (empty)
-└── benchmark/results/           # Benchmark output files
-```
 
 ---
 

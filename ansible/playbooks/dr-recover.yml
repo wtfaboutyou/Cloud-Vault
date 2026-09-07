@@ -1,0 +1,147 @@
+---
+# dr-recover.yml — Full bare-metal disaster recovery.
+#
+# Rebuild a COMPLETELY fresh host (fresh OS install) into a working CloudVault
+# from an encrypted backup. This is the "one command" recovery for industry
+# disaster scenarios (server dead / disk lost / moving to new hardware).
+#
+# Prerequisites (documented in docs/DISASTER_RECOVERY.md):
+#   * a FRESH Debian/Ubuntu install with SSH reachable from the control node
+#   * the ORIGINAL backup.key available on the control node
+#     (vars: cloudvault_backup_key_local, e.g. ./backup.key)
+#   * the encrypted archive reachable — either:
+#       - already at /opt/cloudvault/backup/ on target (local), OR
+#       - on a USB device that will be mounted (cloudvault_usb_enabled + label)
+#   * Ansible Vault provides the secrets for install.sh
+#
+#   ansible-playbook playbooks/dr-recover.yml \
+#       -e cloudvault_backup_key_local=~/vault/cloudvault/backup.key
+#
+# Tier-2 recovery. Tier-1 (`restore.sh` on a live host) is for application-level
+# restore — this play is for when the whole server must be rebuilt.
+#
+- name: DR preflight & bootstrap
+  hosts: cloudvault
+  gather_facts: false
+  tasks:
+    - name: Fail fast if no backup.key path given
+      ansible.builtin.fail:
+        msg: >
+          dr-recover requires cloudvault_backup_key_local (the ORIGINAL key).
+          Archives cannot be decrypted without it.
+      when: cloudvault_backup_key_local | length == 0
+
+  roles:
+    - role: cloudvault_bootstrap
+      tags: [bootstrap]
+
+- name: Copy backup key & mount USB source (if enabled)
+  hosts: cloudvault
+  gather_facts: false
+  tasks:
+    - name: Ensure /etc/cloudvault
+      ansible.builtin.file:
+        path: /etc/cloudvault
+        state: directory
+        mode: '0700'
+    - name: Copy original backup.key
+      ansible.builtin.copy:
+        src: "{{ cloudvault_backup_key_local }}"
+        dest: /etc/cloudvault/backup.key
+        mode: '0600'
+
+    - name: Mount USB backup source by LABEL (self-hosted offsite)
+      block:
+        - name: Create mount point
+          ansible.builtin.file:
+            path: "{{ cloudvault_usb_mount }}"
+            state: directory
+            mode: '0755'
+        - name: Check whether already mounted
+          ansible.builtin.command: mountpoint -q {{ cloudvault_usb_mount }}
+          register: usb_mounted
+          changed_when: false
+          failed_when: false
+        - name: Mount by LABEL (no hardcoded device — VM/physical agnostic)
+          ansible.builtin.command: mount -L {{ cloudvault_usb_label }} {{ cloudvault_usb_mount }}
+          when: usb_mounted.rc != 0
+          register: usb_mount
+      when: cloudvault_usb_enabled
+
+- name: Build full stack (fresh host → packages + config)
+  hosts: cloudvault
+  gather_facts: false
+  roles:
+    - role: cloudvault_deploy
+      tags: [deploy]
+
+- name: Fetch archive & run restore
+  hosts: cloudvault
+  gather_facts: false
+  tasks:
+    - name: Ensure backup dirs
+      ansible.builtin.file:
+        path: "{{ cloudvault_deploy_dir }}/backup"
+        state: directory
+      # The archive lives one level up from backup mirror paths; keep simple.
+
+    - name: Copy encrypted archive from USB (when enabled)
+      ansible.builtin.command: >-
+        rsync -a "{{ cloudvault_usb_mount }}/" "{{ cloudvault_deploy_dir }}/backup/"
+      when: cloudvault_usb_enabled
+      register: usb_sync
+
+    - name: List available archives
+      ansible.builtin.find:
+        paths: "{{ cloudvault_deploy_dir }}/backup"
+        patterns: "cloudvault-*.tar.enc"
+        recurse: true
+      register: _found_archives
+
+    - name: Abort if no archives found (nothing to recover from)
+      ansible.builtin.fail:
+        msg: "No cloudvault-*.tar.enc archives found on target or USB — cannot recover."
+      when: _found_archives.files | length == 0
+
+    - name: Choose restore archive (explicit or latest by mtime)
+      ansible.builtin.set_fact:
+        _restore_archive: >-
+          {{ cloudvault_restore_archive if cloudvault_restore_archive else
+             (_found_archives.files | sort(attribute='mtime') | last).path }}
+
+    - name: Run restore.sh with the chosen archive
+      ansible.builtin.command: >-
+        {{ cloudvault_bash }} {{ cloudvault_deploy_dir }}/scripts/restore.sh
+        {{ _restore_archive }}
+      register: restore_run
+      failed_when: restore_run.rc != 0
+
+    - name: Show restore output
+      ansible.builtin.debug:
+        var: restore_run.stdout_lines
+
+- name: Verify & notify
+  hosts: cloudvault
+  gather_facts: false
+  tasks:
+    - name: Healthcheck
+      ansible.builtin.command:
+        cmd: "{{ cloudvault_bash }} {{ cloudvault_deploy_dir }}/scripts/healthcheck.sh"
+      changed_when: false
+      failed_when: false
+      register: dr_health
+
+    - name: Verify Nextcloud status
+      ansible.builtin.command:
+        cmd: sudo -u www-data php /var/www/nextcloud/occ maintenance:repair
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    - name: Final summary
+      ansible.builtin.debug:
+        msg:
+          - "DR complete on {{ inventory_hostname }}"
+          - "restore exit: {{ restore_run.rc | default('n/a') }}"
+          - "healthcheck exit: {{ dr_health.rc }}"
+          - "Access: https://{{ cloudvault_domain }}"

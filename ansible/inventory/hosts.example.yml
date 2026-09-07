@@ -1,0 +1,53 @@
+# CloudVault Ansible inventory — TEMPLATE.
+#
+# Copy this file to `hosts.yml` (gitignored) and fill in your target host(s).
+#
+#   cp hosts.example.yml hosts.yml
+#
+# Security note: put ANY secret (passwords, tokens, API keys) in Ansible Vault,
+# never in plain text here or in `group_vars/all.yml` directly.
+#
+#   ansible-vault create inventory/group_vars/vault.yml
+#
+# Example single host:
+#   cloudvault:
+#     hosts:
+#       prod:
+#         ansible_host: 192.168.1.100
+#         ansible_user: root
+#
+all:
+  children:
+    cloudvault:
+      hosts:
+        # prod:
+        #   ansible_host: 192.168.1.100
+        #   ansible_user: root
+      vars:
+        # --- Target / deploy settings --------------------------------
+        cloudvault_domain: localhost
+        cloudvault_admin_email: admin@localhost
+        cloudvault_admin_user: admin
+        enable_monitoring: false
+        enable_telegram: false
+
+        # --- Repo / install.sh control --------------------------------
+        # Where the CloudVault repo is (or will be) on the target.
+        cloudvault_deploy_dir: /opt/cloudvault
+        # Absolute path of a control-node working copy to push; empty = git clone.
+        cloudvault_repo_local: ""
+        cloudvault_repo_url: https://github.com/wtfaboutyou/Cloud-Vault.git
+        cloudvault_repo_version: main
+
+        # --- USB offsite backup (self-hosted) --------------------------
+        # LABEL settings. Device name is auto-detected by label, never
+        # hardcoded, so the same roles work on VM and bare-metal.
+        cloudvault_usb_enabled: false
+        cloudvault_usb_label: CLOUDVAULT-BACKUP
+        cloudvault_usb_mount: /mnt/usbbackup
+
+        # --- DR / restore ---------------------------------------------
+        # Path of the ORIGINAL backup.key on the control node (required by
+        # dr-recover); empty = latest archive selected automatically.
+        cloudvault_backup_key_local: ""
+        cloudvault_restore_archive: ""

@@ -1,0 +1,88 @@
+---
+# cloudvault_bootstrap.
+#
+# Brings a (fresh) Debian/Ubuntu target to the minimum state required before
+# `install.sh` runs: base packages, systemd is native, and the deploy script
+# will be pushed in the `cloudvault_deploy` role.
+#
+# This mirrors (and intentionally does NOT duplicate) install.sh Phase 1
+# (`prep`) — Ansible only prepares the connection so the full phase-1-10 flow
+# stays the single source of truth inside `install.sh`.
+#
+- name: Gather OS facts
+  ansible.builtin.setup:
+    gather_subset:
+      - '!all'
+      - os_family
+      - distribution
+      - system
+
+- name: Ensure deploy directory exists
+  ansible.builtin.file:
+    path: "{{ cloudvault_deploy_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Ensure base packages (curl, git, rsync, unzip, python for Ansible)
+  ansible.builtin.apt:
+    name:
+      - curl
+      - git
+      - rsync
+      - unzip
+      - ca-certificates
+      - python3
+      - sudo
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  register: base_pkgs
+
+- name: Ensure swapfile exists (>= 2 GB, mirroring install.sh prep)
+  block:
+    - name: Check existing swap
+      ansible.builtin.command: swapon --show
+      register: swapon_out
+      changed_when: false
+
+    - name: Create 2G swapfile
+      ansible.builtin.command: fallocate -l 2G /swapfile
+      args:
+        creates: /swapfile
+      when: "'/swapfile' not in swapon_out.stdout"
+    - name: Ensure swapfile permissions
+      ansible.builtin.file:
+        path: /swapfile
+        mode: '0600'
+      when: "'/swapfile' not in swapon_out.stdout"
+    - name: mkswap
+      ansible.builtin.command: mkswap /swapfile
+      when: "'/swapfile' not in swapon_out.stdout"
+    - name: Enable swap
+      ansible.builtin.command: swapon /swapfile
+      when: "'/swapfile' not in swapon_out.stdout"
+    - name: Persist swap in fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: '/swapfile none swap sw 0 0'
+        regexp: '^/swapfile'
+      when: "'/swapfile' not in swapon_out.stdout"
+
+- name: Ensure timezone is set
+  ansible.builtin.command: timedatectl set-timezone "{{ cloudvault_timezone | default('Etc/UTC') }}"
+  register: tz_set
+  changed_when: "'changed' in tz_set.stdout"
+  when: cloudvault_timezone is defined
+
+- name: Ensure chrony is enabled
+  ansible.builtin.systemd:
+    name: chrony
+    enabled: true
+    state: started
+  ignore_errors: true
+
+- name: Print bootstrap completion
+  ansible.builtin.debug:
+    msg:
+      - "Bootstrap complete on {{ inventory_hostname }}"
+      - "Deploy dir: {{ cloudvault_deploy_dir }}"

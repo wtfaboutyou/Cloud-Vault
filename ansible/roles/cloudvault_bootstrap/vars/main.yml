@@ -1,0 +1,4 @@
+---
+# Roles variables for `cloudvault_bootstrap`.
+
+cloudvault_timezone: Etc/UTC

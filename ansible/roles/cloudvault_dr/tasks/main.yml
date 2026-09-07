@@ -1,0 +1,67 @@
+---
+# cloudvault_dr — full bare-metal disaster recovery.
+#
+# Rebuilds a COMPLETELY fresh host (fresh OS install) into a working
+# CloudVault, pulling data from an encrypted backup (local or USB offsite).
+# This is Tier-2 recovery; Tier-1 (`restore.sh` on a live host) is already in
+# scripts/.
+#
+# Flow (mirrors docs/DISASTER_RECOVERY.md):
+#   1. preflight  — verify SSH, sudo, sysinfo
+#   2. bootstrap  — install base packages (reuse cloudvault_bootstrap)
+#   3. build stack — run install.sh (all) so all packages/config exist
+#   4. fetch backup — bring the encrypted archive in (local path or USB)
+#   5. restore — run scripts/restore.sh on the archive
+#   6. verify — healthcheck + occ maintenance:repair is done by restore.sh
+#   7. notify — RECOVERY_COMPLETED/FAILED event via Watchtower
+#
+- name: Preflight (SSH reachable, sudo, facts)
+  ansible.builtin.setup:
+    gather_subset:
+      - '!all'
+      - os_family
+      - distribution
+      - system
+      - hardware
+      - environment
+
+- name: Ensure deploy dir
+  ansible.builtin.file:
+    path: "{{ cloudvault_deploy_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Ensure backup key is present on target
+  block:
+    - name: Ensure /etc/cloudvault exists
+      ansible.builtin.file:
+        path: /etc/cloudvault
+        state: directory
+        mode: '0700'
+
+    - name: Copy backup.key from control node
+      ansible.builtin.copy:
+        src: "{{ cloudvault_backup_key_local }}"
+        dest: /etc/cloudvault/backup.key
+        mode: '0600'
+      when: cloudvault_backup_key_local | length > 0
+
+    - name: Generate a fresh backup.key (NO offsite key provided — archives from
+        a previous install will be unrecoverable without the ORIGINAL key)
+      ansible.builtin.command: openssl rand -hex 32
+      register: _new_key
+      when: cloudvault_backup_key_local | length == 0
+    - name: Write generated backup.key
+      ansible.builtin.copy:
+        content: "{{ _new_key.stdout }}\n"
+        dest: /etc/cloudvault/backup.key
+        mode: '0600'
+      when: cloudvault_backup_key_local | length == 0
+      become: true
+
+- name: Ensure archive dependency exists on target (none for dr because restore.sh takes care)
+  ansible.builtin.debug:
+    msg: "restore.sh is invoked by the dr-recover play in playbooks/dr-recover.yml (fetch happens first)"
+
+# The actual order is choreographed in playbooks/dr-recover.yml so this role
+# marks the building + restore steps explicitly.

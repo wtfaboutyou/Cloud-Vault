@@ -1,0 +1,35 @@
+# CloudVault shared group variables.
+#
+# These are the NON-secret defaults. Anything sensitive belongs in
+# `inventory/group_vars/vault.yml` encrypted with Ansible Vault and referenced
+# here via `{{ vault_* }}` — see `../vars/secret.example.yml` for the schema.
+
+# Core identity
+cloudvault_domain: localhost
+cloudvault_admin_email: admin@localhost
+cloudvault_admin_user: admin
+
+# Optional feature flags (mirror install.sh env vars)
+enable_monitoring: false
+enable_telegram: false
+
+# Deploy path on the target
+cloudvault_deploy_dir: /opt/cloudvault
+
+# Repo source for the bootstrap clone/push
+cloudvault_repo_url: https://github.com/wtfaboutyou/Cloud-Vault.git
+cloudvault_repo_version: main
+# Absolute path of a local control-node copy to rsync instead of git clone.
+cloudvault_repo_local: ""
+
+# USB offsite backup
+cloudvault_usb_enabled: false
+cloudvault_usb_label: CLOUDVAULT-BACKUP
+cloudvault_usb_mount: /mnt/usbbackup
+
+# Restore (used by dr-recover.yml)
+cloudvault_restore_archive: ""       # empty = latest archive
+cloudvault_backup_key_local: ""      # backup.key absolute path on control node
+
+# install.sh is executed via `/usr/bin/env bash`, target is Debian/Ubuntu.
+cloudvault_bash: /usr/bin/env bash

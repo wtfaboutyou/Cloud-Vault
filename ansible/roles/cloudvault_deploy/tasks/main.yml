@@ -1,0 +1,83 @@
+---
+# cloudvault_deploy.
+#
+# Pushes the CloudVault repository to the target and runs `scripts/install.sh`
+# non-interactively (`all` stage) with the environment overrides that the
+# installer already understands (NC_DOMAIN, ADMIN_EMAIL, ...). This is the
+# Ansible <-> install.sh contract — the phases stay the single source of truth.
+#
+# NOTE: `install.sh all` does NOT invoke the interactive wizard, so no TTY is
+# required on the target. Secrets come from Ansible Vault (never hardcoded).
+
+- name: Include secrets only if vault defined
+  ansible.builtin.set_fact:
+    _cv_admin_pass: "{{ vault_cloudvault_admin_password | default('') }}"
+    _cv_db_pass: "{{ vault_cloudvault_db_password | default('') }}"
+    _cv_redis_pass: "{{ vault_cloudvault_redis_password | default('') }}"
+    _cv_tg_token: "{{ vault_telegram_bot_token | default('') }}"
+    _cv_tg_chat: "{{ vault_telegram_chat_id | default('') }}"
+
+- name: Fetch repository onto target
+  block:
+    - name: Clone repository (when no local copy given)
+      ansible.builtin.git:
+        repo: "{{ cloudvault_repo_url }}"
+        dest: "{{ cloudvault_deploy_dir }}"
+        version: "{{ cloudvault_repo_version }}"
+        force: true
+      when: not cloudvault_repo_local
+    - name: Rsync local control-node copy to target
+      ansible.builtin.synchronize:
+        src: "{{ cloudvault_repo_local }}/"
+        dest: "{{ cloudvault_deploy_dir }}/"
+        delete: true
+        rsync_opts:
+          - --exclude=.git
+          - --exclude=backup/
+          - --exclude=.secrets/
+      when: cloudvault_repo_local
+
+- name: Ensure the installer is executable
+  ansible.builtin.file:
+    path: "{{ cloudvault_deploy_dir }}/scripts/install.sh"
+    mode: '0755'
+
+- name: Run CloudVault installer (all stages, non-interactive)
+  environment:
+    NC_DOMAIN: "{{ cloudvault_domain }}"
+    ADMIN_EMAIL: "{{ cloudvault_admin_email }}"
+    NC_ADMIN_USER: "{{ cloudvault_admin_user }}"
+    NC_ADMIN_PASS: "{{ _cv_admin_pass }}"
+    NC_DB_PASS: "{{ _cv_db_pass }}"
+    REDIS_PASS: "{{ _cv_redis_pass }}"
+    ENABLE_MONITORING: "{{ enable_monitoring | ternary('yes','no') }}"
+    ENABLE_TELEGRAM: "{{ enable_telegram | ternary('yes','no') }}"
+    ENABLE_WATCHTOWER: "{{ enable_telegram | ternary('yes','no') }}"
+    WATCHTELEGRAM_BOT_TOKEN: "{{ _cv_tg_token }}"
+    WATCHTELEGRAM_ADMIN_USER_ID: "{{ _cv_tg_chat }}"
+  ansible.builtin.command: "{{ cloudvault_bash }} scripts/install.sh all"
+  args:
+    chdir: "{{ cloudvault_deploy_dir }}"
+  register: install_run
+  # A failed phase stops the run and is resumed on the next invocation.
+  changed_when: true
+
+- name: Report installer output
+  ansible.builtin.debug:
+    var: install_run.stdout_lines
+
+- name: Ensure healthcheck is executable
+  ansible.builtin.file:
+    path: "{{ cloudvault_deploy_dir }}/scripts/healthcheck.sh"
+    mode: '0755'
+
+- name: Run healthcheck to verify deployment
+  ansible.builtin.command:
+    cmd: "{{ cloudvault_bash }} {{ cloudvault_deploy_dir }}/scripts/healthcheck.sh"
+  register: health
+  changed_when: false
+  failed_when: false
+
+- name: Report healthcheck summary
+  ansible.builtin.debug:
+    msg: "Healthcheck exit={{ health.rc }} — see output for detail"

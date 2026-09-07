@@ -8,6 +8,7 @@
 # usage:
 #   restore.sh                          # most recent archive under $BACKUP_DIR
 #   restore.sh /path/to/archive.tar.enc # restore a specific archive
+#   restore.sh --from-usb [archive]     # pull archive(s) from USB offsite first
 #
 # Archive layout (produced by backup.sh):
 #   postgres.sql  nextcloud-config.tar.gz  nextcloud-config.php  nextcloud-data.tar.gz
@@ -17,6 +18,8 @@ set -uo pipefail
 
 BACKUP_KEY="/etc/cloudvault/backup.key"
 BACKUP_DIR="/opt/cloudvault/backup"
+USB_MOUNT="${USB_MOUNT:-/mnt/usbbackup}"
+USB_LABEL="${USB_LABEL:-CLOUDVAULT-BACKUP}"
 NC_BASE="/var/www/nextcloud"
 NC_CONFIG_DIR="${NC_BASE}/config"
 NC_DATA_DIR="${NC_BASE}/data"
@@ -127,7 +130,28 @@ restore_archive() {
 
 # ---------------------------------------------------------------------------
 require_root
-CHOICE="$(choose_archive "${@}")"
+
+FROM_USB="no"
+ARGS=()
+for arg in "$@"; do
+  case "${arg}" in
+    --from-usb) FROM_USB="yes";;
+    *) ARGS+=("${arg}");;
+  esac
+done
+
+if [[ "${FROM_USB}" == "yes" ]]; then
+  mountpoint -q "${USB_MOUNT}" || {
+    mkdir -p "${USB_MOUNT}"
+    mount -L "${USB_LABEL}" "${USB_MOUNT}" 2>/dev/null \
+      || fail "USB backup not mounted at ${USB_MOUNT} (colok/periksa USB lalu jalankan usb-backup.sh --umount)";
+  }
+  log "Pulling encrypted archives from USB ${USB_MOUNT} -> ${BACKUP_DIR}"
+  rsync -a "${USB_MOUNT}/" "${BACKUP_DIR}/" >> "${LOG}" 2>&1 \
+    || fail "could not sync archives from USB"
+fi
+
+CHOICE="$(choose_archive "${ARGS[@]}")"
 [[ -n "${CHOICE}" ]] || fail "no backups found under ${BACKUP_DIR}"
 log "Starting restore from: ${CHOICE}"
 restore_archive "${CHOICE}"
