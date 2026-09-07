@@ -8,7 +8,7 @@ Project ini fokus pada **arsitektur web server, administrasi server Linux, deplo
 
 ---
 
-## ⚡ Quickstart (untuk klien / mentor)
+## ⚡ Quickstart
 
 Deploy CloudVault penuh dalam 3 perintah langsung di server (Debian 13/12 atau
 Ubuntu 22.04/24.04):
