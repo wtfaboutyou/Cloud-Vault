@@ -27,7 +27,7 @@
         force: true
       when: not cloudvault_repo_local
     - name: Rsync local control-node copy to target
-      ansible.builtin.synchronize:
+      ansible.posix.synchronize:
         src: "{{ cloudvault_repo_local }}/"
         dest: "{{ cloudvault_deploy_dir }}/"
         delete: true
@@ -50,9 +50,9 @@
     NC_ADMIN_PASS: "{{ _cv_admin_pass }}"
     NC_DB_PASS: "{{ _cv_db_pass }}"
     REDIS_PASS: "{{ _cv_redis_pass }}"
-    ENABLE_MONITORING: "{{ enable_monitoring | ternary('yes','no') }}"
-    ENABLE_TELEGRAM: "{{ enable_telegram | ternary('yes','no') }}"
-    ENABLE_WATCHTOWER: "{{ enable_telegram | ternary('yes','no') }}"
+    ENABLE_MONITORING: "{{ enable_monitoring | ternary('yes', 'no') }}"
+    ENABLE_TELEGRAM: "{{ enable_telegram | ternary('yes', 'no') }}"
+    ENABLE_WATCHTOWER: "{{ enable_telegram | ternary('yes', 'no') }}"
     WATCHTELEGRAM_BOT_TOKEN: "{{ _cv_tg_token }}"
     WATCHTELEGRAM_ADMIN_USER_ID: "{{ _cv_tg_chat }}"
   ansible.builtin.command: "{{ cloudvault_bash }} scripts/install.sh all"

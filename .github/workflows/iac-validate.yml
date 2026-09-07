@@ -25,8 +25,13 @@ jobs:
         working-directory: ansible
         run: |
           cp inventory/hosts.example.yml inventory/hosts.yml
-          # inject a dummy host so playbooks can be parsed
-          sed -i 's/#         ansible_host: 192.168.1.100/         ansible_host: 127.0.0.1/' inventory/hosts.yml
+          # inject a dummy host (uncomment the hosts *inside* the group) so
+          # playbooks parse against a real inventory, not implicit localhost
+          sed -i \
+            -e 's|^        # prod:$|        dummy:|' \
+            -e 's|^        #   ansible_host: 192.168.1.100$|          ansible_host: 127.0.0.1|' \
+            inventory/hosts.yml
+          python3 -c "import yaml; yaml.safe_load(open('inventory/hosts.yml')); print('yml ok')"
 
       - name: Ansible syntax-check all playbooks
         working-directory: ansible

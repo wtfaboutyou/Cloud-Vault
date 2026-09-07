@@ -1,0 +1,7 @@
+---
+# ansible-lint configuration for CloudVault.
+# Shared vars (cloudvault_*, enable_*, ...) are defined ONCE in
+# inventory/group_vars/all.yml and consumed across roles by design;
+# forcing per-role prefixes would fragment that shared namespace.
+skip_list:
+  - var-naming[no-role-prefix]

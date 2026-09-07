@@ -55,12 +55,14 @@
         path: /swapfile
         mode: '0600'
       when: "'/swapfile' not in swapon_out.stdout"
-    - name: mkswap
+    - name: Run mkswap
       ansible.builtin.command: mkswap /swapfile
       when: "'/swapfile' not in swapon_out.stdout"
+      changed_when: true
     - name: Enable swap
       ansible.builtin.command: swapon /swapfile
       when: "'/swapfile' not in swapon_out.stdout"
+      changed_when: true
     - name: Persist swap in fstab
       ansible.builtin.lineinfile:
         path: /etc/fstab
@@ -74,12 +76,16 @@
   changed_when: "'changed' in tz_set.stdout"
   when: cloudvault_timezone is defined
 
-- name: Ensure chrony is enabled
+- name: Ensure chrony is enabled (tolerant if chrony not installed)
   ansible.builtin.systemd:
     name: chrony
     enabled: true
     state: started
-  ignore_errors: true
+  register: chrony_svc
+  changed_when: chrony_svc.changed
+  failed_when:
+    - chrony_svc.failed
+    - "'Could not find the requested service' not in (chrony_svc.msg | default(''))"
 
 - name: Print bootstrap completion
   ansible.builtin.debug:

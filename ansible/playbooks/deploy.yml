@@ -26,11 +26,15 @@
   hosts: cloudvault
   gather_facts: false
   tasks:
+    - name: Gather service states
+      ansible.builtin.service_facts:
     - name: Final service check
-      ansible.builtin.command: systemctl is-active nginx php{{ cloudvault_php_version | default('8.4') }}-fpm postgresql redis-server
-      register: svc
-      changed_when: false
-      ignore_errors: true
-    - name: Show services status
       ansible.builtin.debug:
-        var: svc.stdout_lines
+        msg: >-
+          {{ item | replace('.service', '') }} = {{
+          ansible_facts.services[item].state | default('unknown') }}
+      loop:
+        - nginx.service
+        - php{{ cloudvault_php_version | default('8.4') }}-fpm.service
+        - postgresql.service
+        - redis-server.service
