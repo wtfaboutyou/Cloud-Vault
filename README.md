@@ -101,8 +101,6 @@ Opsi lanjutan (untuk tim infra):
 
 ## 2. Screenshot / Demo
 
-> **Placeholder** — Screenshot/GIF/video demo akan ditambahkan manual sebelum push ke GitHub.
-
 | Tampilan | Deskripsi |
 |----------|-----------|
 | ![Dashboard Nextcloud](docs/assets/screenshots/dashboard.png) | Dashboard Nextcloud setelah login |
